@@ -123,17 +123,23 @@ export function queueState(node, topicId) {
     else if (e.type === 'LEAVE') stand(e.data.familyRoot, e.author, null, e.seq);
   }
 
-  const lineLength = new Map();
+  const standersByOpinion = new Map();
   for (const m of standing.values()) {
-    for (const { opinionId } of m.values()) {
-      if (opinionId) lineLength.set(opinionId, (lineLength.get(opinionId) ?? 0) + 1);
+    for (const [author, { opinionId }] of m.entries()) {
+      if (!opinionId) continue;
+      if (!standersByOpinion.has(opinionId)) standersByOpinion.set(opinionId, []);
+      standersByOpinion.get(opinionId).push(author);
     }
   }
+  for (const list of standersByOpinion.values()) list.sort();
 
   const total = Math.max(node.registry.size, 1);
   return {
     opinions: [...opinions.values()]
-      .map((o) => ({ ...o, weight: lineLength.get(o.id) ?? 0, ratio: (lineLength.get(o.id) ?? 0) / total }))
+      .map((o) => {
+        const standers = standersByOpinion.get(o.id) ?? [];
+        return { ...o, standers, weight: standers.length, ratio: standers.length / total };
+      })
       .sort((a, b) => b.weight - a.weight || (a.id < b.id ? -1 : 1)),
     flagged: [...flagged],
   };
