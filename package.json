@@ -6,10 +6,12 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/test.js && node test/weave.test.js && node test/queue.test.js && node test/insight.test.js",
+    "test": "node test/test.js && node test/weave.test.js && node test/queue.test.js && node test/insight.test.js && node test/peer.test.js",
     "demo:weave": "node demo/weave-demo.js",
     "demo:queue": "node demo/queue-demo.js",
-    "demo:insight": "node demo/insight-demo.js"
+    "demo:insight": "node demo/insight-demo.js",
+    "demo:p2p": "node demo/p2p-demo.js",
+    "peer": "node bin/peer.js"
   },
   "engines": {
     "node": ">=18"
