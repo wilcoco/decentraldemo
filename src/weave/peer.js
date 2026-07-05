@@ -17,6 +17,8 @@
 import net from 'node:net';
 import { WeaveNode } from './node.js';
 import { queueState, tips } from './queue.js';
+import { authorityIndex } from './insight.js';
+import { verifyCredential } from './identity.js';
 import { sha256 } from '../blockchain.js';
 
 // 카탈로그(목차) 주제 — 모든 피어가 기본으로 복제하는 예약 주제.
@@ -27,16 +29,38 @@ import { sha256 } from '../blockchain.js';
 export const CATALOG = 't_@catalog';
 
 export class Peer {
-  constructor({ id, wallet, interests, registry, port = 0, seeds = [], gossipMs = 400, discovery = true }) {
+  constructor({
+    id,
+    wallet,
+    interests,
+    registry,
+    port = 0,
+    seeds = [],
+    gossipMs = 400,
+    discovery = true,
+    admission = 'open', // 'open': 공개키 자동 등록(데모) | 'credential': 자격증명 검증(시빌 방어)
+    issuers = [], // 신뢰하는 자격증명 발급자 공개키 목록 (admission='credential'일 때)
+    credential = null, // 내 지갑의 자격증명 (HELLO/REGISTRY로 함께 전파된다)
+    rateLimit = { max: 60, perMs: 60_000 }, // 작성자별 수용 속도 상한 (스팸 방어)
+    maxLineBytes = 512 * 1024, // 수신 메시지 한 줄 상한 (메모리 폭탄 방어)
+  }) {
     this.id = id;
     this.wallet = wallet; // 이 클라이언트 소유 시민의 지갑 — 개인키는 이 프로세스 밖으로 나가지 않는다
-    this.node = new WeaveNode({ id, interests, registry: registry ?? new Map() });
+    this.node = new WeaveNode({ id, interests, registry: registry ?? new Map(), rateLimit });
     this.node.interests.add(CATALOG);
     if (wallet) this.node.registry.set(wallet.citizenId, wallet.publicKey);
     this.port = port;
     this.seeds = seeds;
     this.gossipMs = gossipMs;
     this.discovery = discovery; // false면 PEERS로 알게 된 피어에 자동 접속하지 않는다
+    this.admission = admission;
+    this.issuers = issuers;
+    this.credential = credential;
+    this.maxLineBytes = maxLineBytes;
+    this.names = new Map(); // citizenId -> 이름 (표시용, 신뢰 근거 아님)
+    if (wallet) this.names.set(wallet.citizenId, wallet.name);
+    this.credentials = new Map(); // citizenId -> credential (재전파용)
+    if (wallet && credential) this.credentials.set(wallet.citizenId, credential);
     this.sockets = new Map(); // socket -> { hello }
     this.dialed = new Set(); // "host:port" 중복 접속 방지
     this.stopped = false;
@@ -86,6 +110,11 @@ export class Peer {
     let buffer = '';
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
+      if (buffer.length > this.maxLineBytes) {
+        // 개행 없이 무한정 커지는 메시지 = 메모리 폭탄 시도로 간주하고 회선을 끊는다
+        socket.destroy();
+        return;
+      }
       let idx;
       while ((idx = buffer.indexOf('\n')) >= 0) {
         const raw = buffer.slice(0, idx);
@@ -99,15 +128,24 @@ export class Peer {
       }
     });
     this.sockets.set(socket, { hello: null });
-    this._send(socket, {
+    this._send(socket, this._helloMsg());
+  }
+
+  _helloMsg() {
+    return {
       type: 'HELLO',
       id: this.id,
       listenPort: this.port,
       interests: [...this.node.interests],
       identity: this.wallet
-        ? { citizenId: this.wallet.citizenId, publicKey: this.wallet.publicKey, name: this.wallet.name }
+        ? {
+            citizenId: this.wallet.citizenId,
+            publicKey: this.wallet.publicKey,
+            name: this.wallet.name,
+            credential: this.credential,
+          }
         : null,
-    });
+    };
   }
 
   _send(socket, msg) {
@@ -204,14 +242,30 @@ export class Peer {
   }
 
   _register(identity) {
-    // 데모: 개방 등록. 실제로는 여기서 DID/영지식 자격증명을 검증한다.
-    if (identity?.citizenId && identity?.publicKey && !this.node.registry.has(identity.citizenId)) {
+    if (!identity?.citizenId || !identity?.publicKey) return;
+    // 시빌 방어: 자격증명 승인 모드에서는 신뢰하는 발급자의 서명이 붙은
+    // 공개키만 등록부에 올린다. 등록되지 않은 시민의 항목은 ingest가 거부하므로,
+    // 무한 계정 생성으로는 여론에 진입할 수 없다.
+    // (실제 시스템: 발급자 임계 서명 + 영지식 증명으로 익명성까지 확보)
+    if (this.admission === 'credential') {
+      if (!verifyCredential(identity.credential, identity.publicKey, this.issuers)) return;
+    }
+    if (!this.node.registry.has(identity.citizenId)) {
       this.node.registry.set(identity.citizenId, identity.publicKey);
+    }
+    if (identity.name && !this.names.has(identity.citizenId)) this.names.set(identity.citizenId, identity.name);
+    if (identity.credential && !this.credentials.has(identity.citizenId)) {
+      this.credentials.set(identity.citizenId, identity.credential);
     }
   }
 
   _identities() {
-    return [...this.node.registry.entries()].map(([citizenId, publicKey]) => ({ citizenId, publicKey }));
+    return [...this.node.registry.entries()].map(([citizenId, publicKey]) => ({
+      citizenId,
+      publicKey,
+      name: this.names.get(citizenId) ?? null,
+      credential: this.credentials.get(citizenId) ?? null,
+    }));
   }
 
   // ── 주기적 가십 (반보정 + 피어/신원 전파) ─────────────────
@@ -270,17 +324,7 @@ export class Peer {
   follow(topicId) {
     if (this.node.interests.has(topicId)) return;
     this.node.interests.add(topicId);
-    for (const socket of this.sockets.keys()) {
-      this._send(socket, {
-        type: 'HELLO',
-        id: this.id,
-        listenPort: this.port,
-        interests: [...this.node.interests],
-        identity: this.wallet
-          ? { citizenId: this.wallet.citizenId, publicKey: this.wallet.publicKey, name: this.wallet.name }
-          : null,
-      });
-    }
+    for (const socket of this.sockets.keys()) this._send(socket, this._helloMsg());
   }
 
   // 관심 표명: 카탈로그의 공표 항목 줄에 선다 (구독과 함께)
@@ -310,7 +354,7 @@ export class Peer {
     }
     for (const topicId of this.node.interests) {
       if (topicId === CATALOG) continue;
-      for (const op of queueState(this.node, topicId).opinions) {
+      for (const op of authorityIndex(this.node, topicId)) {
         if (`${op.title} ${op.body}`.toLowerCase().includes(kw)) {
           const cat = catalogItems.find((c) => c.topicId === topicId);
           results.push({
@@ -320,7 +364,13 @@ export class Peer {
             announceId: cat?.announceId ?? null,
             opinionId: op.id,
             title: op.title,
-            weight: op.weight,
+            status: op.status,
+            weight: op.weight, // 지지 (현재 줄에 선 사람 수)
+            against: op.against, // 반대
+            authority: op.authority, // 안목 가중 지지
+            authorityAgainst: op.authorityAgainst, // 안목 가중 반대
+            supportOpinions: op.supportComments.length, // 첨부된 지지의견 수
+            opposeOpinions: op.opposeComments.length, // 첨부된 반대의견 수
           });
         }
       }
@@ -346,6 +396,24 @@ export class Peer {
         resolve([...results.values()].sort((a, b) => (b.interest ?? b.weight ?? 0) - (a.interest ?? a.weight ?? 0)));
       }, timeoutMs);
     });
+  }
+
+  // ── 입장 표명: 지지 / 반대 (자기 의견 첨부 가능) ──────────
+  // 가족(원안+수정안) 안에서 입장은 하나다 — 새 입장이 이전 입장을 대체한다.
+  supportOpinion(topicId, opinionId, comment = null) {
+    const behind = tips(this.node, opinionId, 'support');
+    if (!behind.length) throw new Error('의견이 아직 동기화되지 않았습니다 (구독 후 잠시 기다리세요)');
+    const data = { opinionId, behind };
+    if (comment) data.comment = String(comment);
+    return this.act(topicId, 'JOIN', data);
+  }
+
+  opposeOpinion(topicId, opinionId, comment = null) {
+    const behind = tips(this.node, opinionId, 'oppose');
+    if (!behind.length) throw new Error('의견이 아직 동기화되지 않았습니다 (구독 후 잠시 기다리세요)');
+    const data = { opinionId, behind };
+    if (comment) data.comment = String(comment);
+    return this.act(topicId, 'OPPOSE', data);
   }
 
   // ── 시민 행위: 로컬 서명 후 즉시 전파 ─────────────────────

@@ -35,45 +35,65 @@ export function computeInsight(node, topicIds) {
     for (const op of queueState(node, topicId).opinions) {
       const root = node.byHash.get(op.id);
       if (!root) continue;
-      const joins = [...node.byHash.values()].filter((e) => e.type === 'JOIN' && e.data.opinionId === op.id);
+      // 지지 줄과 반대 줄은 별도의 DAG — 안목은 양쪽 모두에서 쌓인다.
+      // (나중에 반대가 몰릴 의견을 일찍 반대한 것도 안목이다)
+      //
+      // 헛발질 감점: 내가 선 쪽이 반대쪽보다 열세면 그 격차만큼 줄 점수에서
+      // 깎인다 (진 쪽에 서 있는 동안만). 지위와 마찬가지로 저장되지 않고 매번
+      // 재계산되므로, 여론이 회복되면 감점도 사라진다 — 레그 없음 원칙.
+      // 단순 경합(비등한 찬반)은 벌점이 아니다: "명백히 진 쪽"의 격차만 깎는다.
+      const losingMargin = {
+        support: Math.max(0, op.against - op.weight),
+        oppose: Math.max(0, op.weight - op.against),
+      };
+      for (const [side, type] of [['support', 'JOIN'], ['oppose', 'OPPOSE']]) {
+        const joins = [...node.byHash.values()].filter((e) => e.type === type && e.data.opinionId === op.id);
+        if (side === 'oppose' && joins.length === 0) continue;
+        const lineKey = side === 'support' ? op.id : `${op.id}#반대`;
 
-      // DAG 간선: 항목 해시 -> 그 뒤에 선 항목들
-      // 분기 증명된 시민의 링크도 구조(연결)로는 유지하되, 집계에서만 제외한다.
-      const children = new Map();
-      for (const j of joins) {
-        for (const h of j.data.behind) {
-          if (!children.has(h)) children.set(h, []);
-          children.get(h).push(j);
-        }
-      }
-
-      // 시민별 최초 위치: 제안자는 줄의 머리, 참여자는 가장 이른 줄서기 항목
-      const position = new Map();
-      if (!flagged.has(root.author)) position.set(root.author, root);
-      for (const j of joins) {
-        if (flagged.has(j.author)) continue;
-        const cur = position.get(j.author);
-        if (!cur) position.set(j.author, j);
-        else if (cur !== root && j.seq < cur.seq) position.set(j.author, j);
-      }
-
-      // 내 위치의 후손(뒤에 선 사람들)을 센다 — 특허의 "이후로 링크한 상위 노드"
-      for (const [author, entry] of position) {
-        const seen = new Set([entry.hash]);
-        const stack = [entry.hash];
-        const laterAuthors = new Set();
-        while (stack.length) {
-          const h = stack.pop();
-          for (const child of children.get(h) ?? []) {
-            if (seen.has(child.hash)) continue;
-            seen.add(child.hash);
-            stack.push(child.hash);
-            if (child.author !== author && !flagged.has(child.author)) laterAuthors.add(child.author);
+        // DAG 간선: 항목 해시 -> 그 뒤에 선 항목들
+        // 분기 증명된 시민의 링크도 구조(연결)로는 유지하되, 집계에서만 제외한다.
+        const children = new Map();
+        for (const j of joins) {
+          for (const h of j.data.behind) {
+            if (!children.has(h)) children.set(h, []);
+            children.get(h).push(j);
           }
         }
-        let m = perLine.get(author);
-        if (!m) perLine.set(author, (m = new Map()));
-        m.set(op.id, laterAuthors.size);
+
+        // 시민별 최초 위치: 제안자는 지지 줄의 머리, 참여자는 가장 이른 줄서기 항목
+        const position = new Map();
+        if (side === 'support' && !flagged.has(root.author)) position.set(root.author, root);
+        for (const j of joins) {
+          if (flagged.has(j.author)) continue;
+          const cur = position.get(j.author);
+          if (!cur) position.set(j.author, j);
+          else if (cur !== root && j.seq < cur.seq) position.set(j.author, j);
+        }
+
+        // 내 위치의 후손(뒤에 선 사람들)을 센다 — 특허의 "이후로 링크한 상위 노드"
+        const currentSide = new Set(side === 'support' ? op.standers : op.opposers);
+        for (const [author, entry] of position) {
+          const seen = new Set([entry.hash]);
+          const stack = [entry.hash];
+          const laterAuthors = new Set();
+          while (stack.length) {
+            const h = stack.pop();
+            for (const child of children.get(h) ?? []) {
+              if (seen.has(child.hash)) continue;
+              seen.add(child.hash);
+              stack.push(child.hash);
+              if (child.author !== author && !flagged.has(child.author)) laterAuthors.add(child.author);
+            }
+          }
+          // 감점은 "지금도 진 쪽에 서 있는" 시민에게만 적용된다.
+          // 판단을 철회하고 줄을 떠나면(LEAVE) 감점도 사라진다 — 획득한
+          // 후손 점수(역사)는 남는다.
+          const penalty = currentSide.has(author) ? losingMargin[side] : 0;
+          let m = perLine.get(author);
+          if (!m) perLine.set(author, (m = new Map()));
+          m.set(lineKey, laterAuthors.size - penalty);
+        }
       }
     }
   }
@@ -89,10 +109,16 @@ export function computeInsight(node, topicIds) {
 
 // 의견 권위 지수: 현재 줄에 서 있는 시민들의 (1 + 안목 지수) 합.
 // 같은 길이의 줄이라도 안목이 검증된 시민들이 선 줄의 권위가 높다.
+// 반대 줄에도 같은 계산을 적용한다(authorityAgainst) — 몇 명이 반대하는가만이
+// 아니라 "어떤 안목의 시민들이 반대하는가"가 함께 보인다.
 export function authorityIndex(node, topicId) {
   const { citizenHub } = computeInsight(node);
-  return queueState(node, topicId).opinions.map((op) => {
-    const authority = op.standers.reduce((sum, author) => sum + 1 + (citizenHub.get(author) ?? 0), 0);
-    return { ...op, authority };
-  });
+  // 기본 1표는 불가침(1인 1목소리) — 안목이 음수여도 목소리가 1 아래로
+  // 깎이지는 않는다. 음수 안목은 가중 보너스가 없다는 뜻일 뿐이다.
+  const sum = (authors) => authors.reduce((acc, author) => acc + 1 + Math.max(0, citizenHub.get(author) ?? 0), 0);
+  return queueState(node, topicId).opinions.map((op) => ({
+    ...op,
+    authority: sum(op.standers),
+    authorityAgainst: sum(op.opposers),
+  }));
 }

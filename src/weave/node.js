@@ -15,13 +15,16 @@ import { verifyEntry, isFork } from './entry.js';
 import { THRESHOLDS } from '../democracy.js';
 
 export class WeaveNode {
-  constructor({ id, interests, registry }) {
+  constructor({ id, interests, registry, maxDataBytes = 8192, rateLimit = null }) {
     this.id = id;
     this.interests = new Set(interests); // 이 노드가 복제하기로 선택한 주제들
     this.registry = registry; // 신원 등록부: citizenId -> publicKey (신원 계층 가정)
     this.entries = new Map(); // author -> Map(seq -> entry) — 관심 주제 항목만 (부분 복제)
     this.byHash = new Map(); // hash -> entry (참조 해석·중복 제거용)
     this.forkProofs = new Map(); // author -> { a, b } 분기 증명 (전파 가능한 배신의 증거)
+    this.maxDataBytes = maxDataBytes; // 항목 데이터 크기 상한 (저장 폭탄 방어)
+    this.rateLimit = rateLimit; // { max, perMs } — 작성자별 수용 속도 상한 (스팸 방어)
+    this._rateWindow = new Map(); // author -> [수용 시각들]
   }
 
   // ── 수신: 검증 후 저장 ─────────────────────────────────────
@@ -29,8 +32,25 @@ export class WeaveNode {
     const publicKey = this.registry.get(entry.author);
     if (!publicKey) return { accepted: false, reason: '등록되지 않은 시민' };
     if (!this.interests.has(entry.topicId)) return { accepted: false, reason: '관심 밖 주제' };
+    if (JSON.stringify(entry.data ?? null).length > this.maxDataBytes) {
+      return { accepted: false, reason: '항목 데이터 과대' };
+    }
     if (!verifyEntry(entry, publicKey)) return { accepted: false, reason: '서명/해시 불일치' };
     if (this.byHash.has(entry.hash)) return { accepted: false, reason: '중복' };
+    if (this.rateLimit) {
+      // 속도 제한은 "거부"이지 "차단"이 아니다 — 반보정 가십이 나중에 다시
+      // 시도하므로 정직한 항목은 창이 비면 결국 수용된다. 홍수만 늦춘다.
+      const now = Date.now();
+      const window = (this._rateWindow.get(entry.author) ?? []).filter(
+        (t) => now - t < this.rateLimit.perMs
+      );
+      if (window.length >= this.rateLimit.max) {
+        this._rateWindow.set(entry.author, window);
+        return { accepted: false, reason: '속도 제한 (작성자별 수용 상한)' };
+      }
+      window.push(now);
+      this._rateWindow.set(entry.author, window);
+    }
 
     let authorLog = this.entries.get(entry.author);
     if (!authorLog) {

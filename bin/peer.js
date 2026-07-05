@@ -15,7 +15,9 @@
 //   c <제목>        새 이슈 생성 + 네트워크에 공표
 //   f <번호>        이슈에 관심 표명(줄서기) + 구독 + 현재 이슈로 전환
 //   p <제목>        현재 이슈에 새 의견 제안 (줄의 머리)
-//   j <번호>        해당 의견 줄에 서기 (지지)
+//   j <번호> [의견] 지지 줄에 서기 (자기 의견 첨부 가능)
+//   o <번호> [의견] 반대 줄에 서기 (자기 의견 첨부 가능)
+//   d <번호>        의견 상세: 지지의견/반대의견 목록
 //   l <번호>        그 의견 가족의 줄에서 떠나기
 //   a <번호> <제목> 해당 의견에서 분기한 수정안 제안
 //   s               현재 상태 (의견 줄·길이·권위)
@@ -51,7 +53,7 @@ console.log(`─ ${name} 의 P2P 시민 클라이언트`);
 console.log(`  주소: 127.0.0.1:${peer.port} (다른 피어의 --seeds 값으로 쓰세요)`);
 console.log(`  시민 ID: ${wallet.citizenId} (공개키에서 유도, 개인키는 이 프로세스에만 존재)`);
 console.log(`  구독 주제: ${topics.length ? topics.join(', ') : '(카탈로그만 — t로 전체 이슈를 조회하세요)'}`);
-console.log(`  명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
+console.log(`  명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 지지[+의견] / o 반대[+의견] / d 상세 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
 
 let currentTopic = topics[0] ?? null;
 let lastList = []; // s 출력의 번호 → 의견 id
@@ -95,9 +97,14 @@ function printState() {
     withAuthority.forEach((o, i) => {
       const idx = t === currentTopic ? `${i}` : '-';
       const fork = o.parentId ? ' └(수정안)' : '';
+      const my = o.standers.includes(wallet.citizenId)
+        ? ' [지지 중]'
+        : o.opposers.includes(wallet.citizenId)
+          ? ' [반대 중]'
+          : '';
       console.log(
-        `  ${idx}.${fork} ${o.title} — 길이 ${o.weight}명, 권위 ${o.authority.toFixed(1)}` +
-          (o.standers.includes(wallet.citizenId) ? ' [서 있음]' : '')
+        `  ${idx}.${fork} [${o.status}] ${o.title} — 지지 ${o.weight}명(권위 ${o.authority.toFixed(1)}) vs 반대 ${o.against}명(권위 ${o.authorityAgainst.toFixed(1)})` +
+          `, 지지의견 ${o.supportComments.length}·반대의견 ${o.opposeComments.length}${my}`
       );
     });
   }
@@ -121,7 +128,9 @@ rl.on('line', (line) => {
           } else {
             if (h.announceId) lastCatalog.push(h.announceId);
             const fRef = h.announceId ? ` (f ${lastCatalog.length - 1} 로 이슈 구독)` : '';
-            console.log(`  - [의견] ${h.title} — 이슈 "${h.topicTitle}", 줄 ${h.weight}명, 찾은 피어: ${h.foundBy}${fRef}`);
+            console.log(
+              `  - [의견][${h.status}] ${h.title} — 이슈 "${h.topicTitle}", 지지 ${h.weight}(권위 ${h.authority?.toFixed(1)}) vs 반대 ${h.against}(권위 ${h.authorityAgainst?.toFixed(1)}), 지지의견 ${h.supportOpinions}·반대의견 ${h.opposeOpinions}, 찾은 피어: ${h.foundBy}${fRef}`
+            );
           }
         });
         if (!hits.length) console.log('  (없음 — TTL 밖이거나 존재하지 않는 키워드)');
@@ -147,8 +156,26 @@ rl.on('line', (line) => {
     } else if (cmd === 'j' && rest[0] != null) {
       const opinionId = lastList[Number(rest[0])];
       if (!opinionId) throw new Error('먼저 s로 목록을 확인하세요');
-      peer.act(currentTopic, 'JOIN', { opinionId, behind: tips(peer.node, opinionId) });
-      console.log('줄에 섰습니다. 내 서명이 앞사람들의 자리를 고정합니다.');
+      const comment = rest.slice(1).join(' ') || null;
+      peer.supportOpinion(currentTopic, opinionId, comment);
+      console.log(comment ? '의견을 첨부해 지지 줄에 섰습니다.' : '지지 줄에 섰습니다. 내 서명이 앞사람들의 자리를 고정합니다.');
+    } else if (cmd === 'o' && rest[0] != null) {
+      const opinionId = lastList[Number(rest[0])];
+      if (!opinionId) throw new Error('먼저 s로 목록을 확인하세요');
+      const comment = rest.slice(1).join(' ') || null;
+      peer.opposeOpinion(currentTopic, opinionId, comment);
+      console.log(comment ? '의견을 첨부해 반대 줄에 섰습니다.' : '반대 줄에 섰습니다. (지지 중이었다면 지지 줄에서 자동으로 빠집니다)');
+    } else if (cmd === 'd' && rest[0] != null) {
+      const opinionId = lastList[Number(rest[0])];
+      if (!opinionId) throw new Error('먼저 s로 목록을 확인하세요');
+      const op = authorityIndex(peer.node, currentTopic).find((x) => x.id === opinionId);
+      console.log(`\n${op.title} [${op.status}]`);
+      if (op.body) console.log(`  ${op.body}`);
+      console.log(`  지지 ${op.weight}명 (권위 ${op.authority.toFixed(1)}) / 반대 ${op.against}명 (권위 ${op.authorityAgainst.toFixed(1)})`);
+      console.log(`  지지의견 ${op.supportComments.length}건:`);
+      for (const cmt of op.supportComments) console.log(`    + ${nameOf(cmt.authorId)}: ${cmt.text}`);
+      console.log(`  반대의견 ${op.opposeComments.length}건:`);
+      for (const cmt of op.opposeComments) console.log(`    - ${nameOf(cmt.authorId)}: ${cmt.text}`);
     } else if (cmd === 'l' && rest[0] != null) {
       const opinionId = lastList[Number(rest[0])];
       if (!opinionId) throw new Error('먼저 s로 목록을 확인하세요');
@@ -178,7 +205,7 @@ rl.on('line', (line) => {
       peer.stop();
       process.exit(0);
     } else if (cmd) {
-      console.log('명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
+      console.log('명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 지지[+의견] / o 반대[+의견] / d 상세 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
     }
   } catch (err) {
     console.log(`오류: ${err.message}`);
