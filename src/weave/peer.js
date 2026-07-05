@@ -27,7 +27,7 @@ import { sha256 } from '../blockchain.js';
 export const CATALOG = 't_@catalog';
 
 export class Peer {
-  constructor({ id, wallet, interests, registry, port = 0, seeds = [], gossipMs = 400 }) {
+  constructor({ id, wallet, interests, registry, port = 0, seeds = [], gossipMs = 400, discovery = true }) {
     this.id = id;
     this.wallet = wallet; // 이 클라이언트 소유 시민의 지갑 — 개인키는 이 프로세스 밖으로 나가지 않는다
     this.node = new WeaveNode({ id, interests, registry: registry ?? new Map() });
@@ -36,9 +36,14 @@ export class Peer {
     this.port = port;
     this.seeds = seeds;
     this.gossipMs = gossipMs;
+    this.discovery = discovery; // false면 PEERS로 알게 된 피어에 자동 접속하지 않는다
     this.sockets = new Map(); // socket -> { hello }
     this.dialed = new Set(); // "host:port" 중복 접속 방지
     this.stopped = false;
+    // 키워드 검색 상태
+    this.seenSearches = new Set(); // 같은 질의를 두 번 처리/전파하지 않기 위한 qid 기록
+    this.searchRoutes = new Map(); // qid -> 질의가 들어온 소켓 (결과를 되돌릴 역경로)
+    this.pendingSearches = new Map(); // 내가 발신한 질의: qid -> { results }
   }
 
   async start() {
@@ -131,7 +136,7 @@ export class Peer {
         break;
       }
       case 'PEERS':
-        for (const p of msg.peers ?? []) this._dial(p);
+        if (this.discovery) for (const p of msg.peers ?? []) this._dial(p);
         break;
       case 'REGISTRY':
         for (const identity of msg.identities ?? []) this._register(identity);
@@ -154,6 +159,36 @@ export class Peer {
       case 'ENTRIES':
         for (const entry of msg.entries ?? []) this.node.ingest(entry);
         break;
+      case 'SEARCH': {
+        // 질의 전파(query flooding): 같은 질의는 한 번만 처리하고,
+        // 내 로컬에서 찾은 결과를 질의가 온 소켓으로 되돌린 뒤 TTL을 줄여 이웃에 전달한다.
+        if (this.seenSearches.has(msg.qid)) break;
+        this.seenSearches.add(msg.qid);
+        this.searchRoutes.set(msg.qid, socket);
+        const found = this.searchLocal(msg.keyword);
+        if (found.length) this._send(socket, { type: 'RESULTS', qid: msg.qid, results: found, foundBy: this.id });
+        if (msg.ttl > 1) {
+          for (const [s, m] of this.sockets) {
+            if (s !== socket && m.hello) this._send(s, { type: 'SEARCH', qid: msg.qid, keyword: msg.keyword, ttl: msg.ttl - 1 });
+          }
+        }
+        break;
+      }
+      case 'RESULTS': {
+        const pending = this.pendingSearches.get(msg.qid);
+        if (pending) {
+          // 내가 발신한 질의의 결과: (주제, 의견) 기준으로 중복 제거하며 수집
+          for (const r of msg.results ?? []) {
+            const key = `${r.topicId}|${r.opinionId ?? ''}`;
+            if (!pending.results.has(key)) pending.results.set(key, { ...r, foundBy: msg.foundBy });
+          }
+        } else {
+          // 남의 질의의 결과: 질의가 들어왔던 역경로로 중계한다
+          const route = this.searchRoutes.get(msg.qid);
+          if (route) this._send(route, msg);
+        }
+        break;
+      }
       case 'FORKS':
         for (const proof of msg.proofs ?? []) {
           if (proof?.a?.author && !this.node.forkProofs.has(proof.a.author)) {
@@ -254,6 +289,63 @@ export class Peer {
     if (!announce) throw new Error('알 수 없는 공표입니다');
     this.follow(announce.data.topicId);
     return this.act(CATALOG, 'JOIN', { opinionId: announceId, behind: tips(this.node, announceId) });
+  }
+
+  // ── 키워드 검색 ───────────────────────────────────────────
+  // 두 층위로 동작한다:
+  //  1. 이슈(목차) 검색 — 카탈로그는 전원 복제이므로 항상 로컬에서 완결된다.
+  //  2. 본문(의견) 검색 — 나는 내가 복제한 주제만 뒤질 수 있으므로, 질의를
+  //     이웃에게 흘려보내면(query flooding) 그 주제를 복제 중인 피어가 자기
+  //     로컬을 뒤져 결과를 역경로로 돌려준다. "관심 있는 사람이 저장하고,
+  //     저장한 사람이 검색해 준다" — 저장 구조와 검색 구조가 일치한다.
+  // 규모 확장 시에는 DHT 역색인(키워드→주제 포인터)으로 대체한다.
+  searchLocal(keyword) {
+    const kw = String(keyword).toLowerCase();
+    const results = [];
+    const catalogItems = this.catalog();
+    for (const c of catalogItems) {
+      if (`${c.title} ${c.description} ${c.domain}`.toLowerCase().includes(kw)) {
+        results.push({ kind: '이슈', topicId: c.topicId, title: c.title, announceId: c.announceId, interest: c.interest });
+      }
+    }
+    for (const topicId of this.node.interests) {
+      if (topicId === CATALOG) continue;
+      for (const op of queueState(this.node, topicId).opinions) {
+        if (`${op.title} ${op.body}`.toLowerCase().includes(kw)) {
+          const cat = catalogItems.find((c) => c.topicId === topicId);
+          results.push({
+            kind: '의견',
+            topicId,
+            topicTitle: cat?.title ?? topicId,
+            announceId: cat?.announceId ?? null,
+            opinionId: op.id,
+            title: op.title,
+            weight: op.weight,
+          });
+        }
+      }
+    }
+    return results;
+  }
+
+  // 네트워크 검색: 로컬 결과 + TTL 홉 안의 피어들이 찾아 준 결과를 모아 돌려준다.
+  search(keyword, { ttl = 3, timeoutMs = 1500 } = {}) {
+    const qid = sha256(`${this.id}|${Date.now()}|${Math.random()}`).slice(0, 16);
+    this.seenSearches.add(qid);
+    const results = new Map();
+    for (const r of this.searchLocal(keyword)) {
+      results.set(`${r.topicId}|${r.opinionId ?? ''}`, { ...r, foundBy: this.id });
+    }
+    this.pendingSearches.set(qid, { results });
+    for (const [socket, meta] of this.sockets) {
+      if (meta.hello) this._send(socket, { type: 'SEARCH', qid, keyword, ttl });
+    }
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        this.pendingSearches.delete(qid);
+        resolve([...results.values()].sort((a, b) => (b.interest ?? b.weight ?? 0) - (a.interest ?? a.weight ?? 0)));
+      }, timeoutMs);
+    });
   }
 
   // ── 시민 행위: 로컬 서명 후 즉시 전파 ─────────────────────

@@ -10,6 +10,7 @@
 // 피어 발견으로 그물망이 형성된다.
 //
 // 명령:
+//   k <키워드>      네트워크 키워드 검색 (이슈는 즉시, 본문은 이웃 피어가 찾아 줌)
 //   t               전체 이슈 조회 (카탈로그 — 관심도 순)
 //   c <제목>        새 이슈 생성 + 네트워크에 공표
 //   f <번호>        이슈에 관심 표명(줄서기) + 구독 + 현재 이슈로 전환
@@ -50,7 +51,7 @@ console.log(`─ ${name} 의 P2P 시민 클라이언트`);
 console.log(`  주소: 127.0.0.1:${peer.port} (다른 피어의 --seeds 값으로 쓰세요)`);
 console.log(`  시민 ID: ${wallet.citizenId} (공개키에서 유도, 개인키는 이 프로세스에만 존재)`);
 console.log(`  구독 주제: ${topics.length ? topics.join(', ') : '(카탈로그만 — t로 전체 이슈를 조회하세요)'}`);
-console.log(`  명령: t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
+console.log(`  명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
 
 let currentTopic = topics[0] ?? null;
 let lastList = []; // s 출력의 번호 → 의견 id
@@ -109,7 +110,24 @@ rl.on('line', (line) => {
   try {
     const [cmd, ...rest] = line.trim().split(/\s+/);
     const argText = rest.join(' ');
-    if (cmd === 't') {
+    if (cmd === 'k' && argText) {
+      peer.search(argText).then((hits) => {
+        console.log(`\n"${argText}" 검색 결과 ${hits.length}건:`);
+        lastCatalog = [];
+        hits.forEach((h, i) => {
+          if (h.kind === '이슈') {
+            lastCatalog.push(h.announceId);
+            console.log(`  ${lastCatalog.length - 1}. [이슈] ${h.title} — 관심 ${h.interest}명 (f ${lastCatalog.length - 1} 로 구독)`);
+          } else {
+            if (h.announceId) lastCatalog.push(h.announceId);
+            const fRef = h.announceId ? ` (f ${lastCatalog.length - 1} 로 이슈 구독)` : '';
+            console.log(`  - [의견] ${h.title} — 이슈 "${h.topicTitle}", 줄 ${h.weight}명, 찾은 피어: ${h.foundBy}${fRef}`);
+          }
+        });
+        if (!hits.length) console.log('  (없음 — TTL 밖이거나 존재하지 않는 키워드)');
+        rl.prompt();
+      });
+    } else if (cmd === 't') {
       printCatalog();
     } else if (cmd === 'c' && argText) {
       const { topicId } = peer.announceTopic({ title: argText });
@@ -160,7 +178,7 @@ rl.on('line', (line) => {
       peer.stop();
       process.exit(0);
     } else if (cmd) {
-      console.log('명령: t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
+      console.log('명령: k 검색 / t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
     }
   } catch (err) {
     console.log(`오류: ${err.message}`);
