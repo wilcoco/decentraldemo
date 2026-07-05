@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>아고라 라이브 — 실시간 민주주의 시스템</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>아고라 라이브</h1>
+      <p>임기 없는 실시간 민주주의 — 지지는 언제든 철회되고, 지위는 매 순간 다시 계산됩니다</p>
+    </div>
+    <div class="header-controls">
+      <span id="chain-status" class="pill">체인 확인 중…</span>
+      <button id="sim-toggle" class="btn">시뮬레이션 시작</button>
+      <select id="citizen-select"></select>
+      <form id="register-form">
+        <input id="register-name" placeholder="새 시민 이름" />
+        <button class="btn" type="submit">참여</button>
+      </form>
+    </div>
+  </header>
+
+  <main>
+    <aside id="issues-panel">
+      <h2>국정 과제 (분야별 분할)</h2>
+      <div id="issues-list"></div>
+    </aside>
+
+    <section id="opinions-panel">
+      <div id="issue-header"></div>
+      <div id="opinions-list"></div>
+      <form id="propose-form" class="card">
+        <h3>새 의견 제안</h3>
+        <input id="propose-title" placeholder="주장 한 줄 요약" required />
+        <textarea id="propose-body" placeholder="구체적 내용과 논거"></textarea>
+        <button class="btn primary" type="submit">제안하기</button>
+      </form>
+    </section>
+
+    <aside id="right-panel">
+      <div class="card">
+        <h2>분야별 위임 <small>(즉시 회수 가능)</small></h2>
+        <p class="hint">직접 참여하지 않는 분야의 목소리를 신뢰하는 시민에게 흘려보냅니다. 직접 지지하면 위임보다 항상 우선합니다.</p>
+        <div id="delegation-list"></div>
+      </div>
+      <div class="card">
+        <h2>신뢰 네트워크 <small>(블록체인)</small></h2>
+        <p class="hint">모든 제안·지지·철회·위임·검증은 서명되어 체인에 기록됩니다.</p>
+        <div id="chain-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
