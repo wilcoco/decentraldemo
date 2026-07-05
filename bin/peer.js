@@ -10,7 +10,10 @@
 // 피어 발견으로 그물망이 형성된다.
 //
 // 명령:
-//   p <제목>        새 의견 제안 (줄의 머리)
+//   t               전체 이슈 조회 (카탈로그 — 관심도 순)
+//   c <제목>        새 이슈 생성 + 네트워크에 공표
+//   f <번호>        이슈에 관심 표명(줄서기) + 구독 + 현재 이슈로 전환
+//   p <제목>        현재 이슈에 새 의견 제안 (줄의 머리)
 //   j <번호>        해당 의견 줄에 서기 (지지)
 //   l <번호>        그 의견 가족의 줄에서 떠나기
 //   a <번호> <제목> 해당 의견에서 분기한 수정안 제안
@@ -20,7 +23,7 @@
 //   q               종료
 import readline from 'node:readline';
 import { Wallet } from '../src/weave/entry.js';
-import { Peer } from '../src/weave/peer.js';
+import { Peer, CATALOG } from '../src/weave/peer.js';
 import { tips, queueState } from '../src/weave/queue.js';
 import { computeInsight, authorityIndex } from '../src/weave/insight.js';
 
@@ -30,7 +33,7 @@ for (let i = 2; i < process.argv.length; i += 2) {
   args[process.argv[i].replace(/^--/, '')] = process.argv[i + 1];
 }
 const name = args.name ?? `시민${Math.floor(Math.random() * 1000)}`;
-const topics = (args.topics ?? 't_광장').split(',');
+const topics = (args.topics ?? '').split(',').filter(Boolean);
 const seeds = (args.seeds ?? '')
   .split(',')
   .filter(Boolean)
@@ -46,11 +49,32 @@ await peer.start();
 console.log(`─ ${name} 의 P2P 시민 클라이언트`);
 console.log(`  주소: 127.0.0.1:${peer.port} (다른 피어의 --seeds 값으로 쓰세요)`);
 console.log(`  시민 ID: ${wallet.citizenId} (공개키에서 유도, 개인키는 이 프로세스에만 존재)`);
-console.log(`  관심 주제: ${topics.join(', ')}`);
-console.log(`  명령: p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
+console.log(`  구독 주제: ${topics.length ? topics.join(', ') : '(카탈로그만 — t로 전체 이슈를 조회하세요)'}`);
+console.log(`  명령: t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료\n`);
 
-let currentTopic = topics[0];
+let currentTopic = topics[0] ?? null;
 let lastList = []; // s 출력의 번호 → 의견 id
+let lastCatalog = []; // t 출력의 번호 → 공표 id
+
+const followedTopics = () => [...peer.node.interests].filter((t) => t !== CATALOG);
+
+function printCatalog() {
+  const items = peer.catalog();
+  lastCatalog = items.map((i) => i.announceId);
+  console.log(`\n네트워크 전체 이슈 ${items.length}개 (관심도 순):`);
+  items.forEach((i, idx) => {
+    const marks = [
+      i.following ? '구독중' : null,
+      i.topicId === currentTopic ? '현재' : null,
+    ].filter(Boolean);
+    console.log(
+      `  ${idx}. ${i.title}${i.domain ? ` [${i.domain}]` : ''} — 관심 ${i.interest}명` +
+        (i.following ? `, 보유 항목 ${i.localEntries}개` : '') +
+        (marks.length ? ` (${marks.join('·')})` : '')
+    );
+  });
+  if (!items.length) console.log('  (아직 공표된 이슈가 없습니다 — c <제목>으로 만들어 보세요)');
+}
 
 const nameOf = (id) => {
   // 등록부의 공개키로는 이름을 알 수 없으므로, HELLO로 알게 된 이름 캐시가 없으면 ID 축약
@@ -58,9 +82,14 @@ const nameOf = (id) => {
 };
 
 function printState() {
-  for (const t of topics) {
+  if (!followedTopics().length) {
+    console.log('구독 중인 이슈가 없습니다. t로 조회하고 f <번호>로 구독하세요.');
+    return;
+  }
+  for (const t of followedTopics()) {
     const withAuthority = authorityIndex(peer.node, t);
-    console.log(`\n[${t}] 의견 줄 (${withAuthority.length}개)`);
+    const label = peer.catalog().find((c) => c.topicId === t)?.title ?? t;
+    console.log(`\n[${label}] 의견 줄 (${withAuthority.length}개)${t === currentTopic ? ' ← 현재 이슈' : ''}`);
     if (t === currentTopic) lastList = withAuthority.map((o) => o.id);
     withAuthority.forEach((o, i) => {
       const idx = t === currentTopic ? `${i}` : '-';
@@ -80,7 +109,21 @@ rl.on('line', (line) => {
   try {
     const [cmd, ...rest] = line.trim().split(/\s+/);
     const argText = rest.join(' ');
-    if (cmd === 'p' && argText) {
+    if (cmd === 't') {
+      printCatalog();
+    } else if (cmd === 'c' && argText) {
+      const { topicId } = peer.announceTopic({ title: argText });
+      currentTopic = topicId;
+      console.log(`이슈를 생성해 네트워크에 공표했습니다: ${argText} (${topicId})`);
+    } else if (cmd === 'f' && rest[0] != null) {
+      const announceId = lastCatalog[Number(rest[0])];
+      if (!announceId) throw new Error('먼저 t로 카탈로그를 확인하세요');
+      const entry = peer.expressInterest(announceId);
+      currentTopic = peer.node.byHash.get(announceId).data.topicId;
+      console.log('관심 줄에 서고 구독을 시작했습니다 — 과거 항목이 곧 채워집니다.');
+      void entry;
+    } else if (cmd === 'p' && argText) {
+      if (!currentTopic) throw new Error('현재 이슈가 없습니다. c로 만들거나 f로 구독하세요');
       const e = peer.act(currentTopic, 'PROPOSE', { title: argText });
       console.log(`제안했습니다: ${argText} (${e.hash.slice(0, 10)}…)`);
     } else if (cmd === 'j' && rest[0] != null) {
@@ -117,7 +160,7 @@ rl.on('line', (line) => {
       peer.stop();
       process.exit(0);
     } else if (cmd) {
-      console.log('명령: p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
+      console.log('명령: t 전체이슈 / c 이슈생성 / f 관심+구독 / p 제안 / j 줄서기 / l 떠나기 / a 수정안 / s 상태 / h 안목 / n 피어 / q 종료');
     }
   } catch (err) {
     console.log(`오류: ${err.message}`);

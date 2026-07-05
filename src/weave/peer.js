@@ -16,12 +16,22 @@
 // "실존 유권자의 키인가"를 확인한 뒤에만 등록부에 올리는 것.
 import net from 'node:net';
 import { WeaveNode } from './node.js';
+import { queueState, tips } from './queue.js';
+import { sha256 } from '../blockchain.js';
+
+// 카탈로그(목차) 주제 — 모든 피어가 기본으로 복제하는 예약 주제.
+// "본문은 관심 있는 것만, 목차는 모두가": 이슈의 존재를 알리는 공표(ANNOUNCE)
+// 항목만 담기므로 가볍고, 이것이 P2P 환경에서 전체 이슈 조회를 가능하게 한다.
+// 공표는 일반 PROPOSE 항목이므로 줄서기(관심 표명)·안목 지수가 그대로 적용된다 —
+// 중요한 이슈를 일찍 알아본 사람이 의제 설정 단계에서도 안목을 얻는다.
+export const CATALOG = 't_@catalog';
 
 export class Peer {
   constructor({ id, wallet, interests, registry, port = 0, seeds = [], gossipMs = 400 }) {
     this.id = id;
     this.wallet = wallet; // 이 클라이언트 소유 시민의 지갑 — 개인키는 이 프로세스 밖으로 나가지 않는다
     this.node = new WeaveNode({ id, interests, registry: registry ?? new Map() });
+    this.node.interests.add(CATALOG);
     if (wallet) this.node.registry.set(wallet.citizenId, wallet.publicKey);
     this.port = port;
     this.seeds = seeds;
@@ -187,6 +197,63 @@ export class Peer {
         this._send(socket, { type: 'FORKS', proofs: [...this.node.forkProofs.values()] });
       }
     }
+  }
+
+  // ── 전체 이슈 조회 (카탈로그) ─────────────────────────────
+  // 새 이슈를 만들고 카탈로그에 공표한다. 공표 항목이 그 이슈의 "관심 줄" 머리가 된다.
+  announceTopic({ title, description = '', domain = '' }) {
+    const topicId = 't_' + sha256(`${title}|${this.wallet.citizenId}|${this.wallet.seq}`).slice(0, 12);
+    this.follow(topicId); // 만든 사람은 당연히 구독
+    const entry = this.act(CATALOG, 'PROPOSE', { title, body: description, topicId, domain });
+    return { topicId, announceId: entry.hash };
+  }
+
+  // 네트워크에 존재하는 전체 이슈 목록: 카탈로그를 접으면 나온다.
+  // interest = 관심 줄 길이(공표에 줄 선 시민 수), following = 내가 본문을 복제 중인가.
+  catalog() {
+    return queueState(this.node, CATALOG)
+      .opinions.map((o) => {
+        const announce = this.node.byHash.get(o.id);
+        const topicId = announce?.data.topicId;
+        return {
+          topicId,
+          title: o.title,
+          description: o.body,
+          domain: announce?.data.domain ?? '',
+          announceId: o.id,
+          interest: o.weight,
+          standers: o.standers,
+          following: topicId ? this.node.interests.has(topicId) : false,
+          localEntries: topicId ? this.node.entriesForTopic(topicId).length : 0,
+        };
+      })
+      .filter((c) => c.topicId);
+  }
+
+  // 이슈 구독: 지금부터 이 주제를 복제한다. 갱신된 관심사를 이웃에게 다시
+  // 알리면(재-HELLO), 반보정 가십이 과거 항목 전체를 채워 준다.
+  follow(topicId) {
+    if (this.node.interests.has(topicId)) return;
+    this.node.interests.add(topicId);
+    for (const socket of this.sockets.keys()) {
+      this._send(socket, {
+        type: 'HELLO',
+        id: this.id,
+        listenPort: this.port,
+        interests: [...this.node.interests],
+        identity: this.wallet
+          ? { citizenId: this.wallet.citizenId, publicKey: this.wallet.publicKey, name: this.wallet.name }
+          : null,
+      });
+    }
+  }
+
+  // 관심 표명: 카탈로그의 공표 항목 줄에 선다 (구독과 함께)
+  expressInterest(announceId) {
+    const announce = this.node.byHash.get(announceId);
+    if (!announce) throw new Error('알 수 없는 공표입니다');
+    this.follow(announce.data.topicId);
+    return this.act(CATALOG, 'JOIN', { opinionId: announceId, behind: tips(this.node, announceId) });
   }
 
   // ── 시민 행위: 로컬 서명 후 즉시 전파 ─────────────────────
