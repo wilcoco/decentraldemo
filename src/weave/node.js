@@ -20,7 +20,7 @@ export class WeaveNode {
     this.interests = new Set(interests); // 이 노드가 복제하기로 선택한 주제들
     this.registry = registry; // 신원 등록부: citizenId -> publicKey (신원 계층 가정)
     this.entries = new Map(); // author -> Map(seq -> entry) — 관심 주제 항목만 (부분 복제)
-    this.byHash = new Set();
+    this.byHash = new Map(); // hash -> entry (참조 해석·중복 제거용)
     this.forkProofs = new Map(); // author -> { a, b } 분기 증명 (전파 가능한 배신의 증거)
   }
 
@@ -44,7 +44,7 @@ export class WeaveNode {
       return { accepted: false, reason: '로그 분기 감지', forkProof: this.forkProofs.get(entry.author) };
     }
     authorLog.set(entry.seq, entry);
-    this.byHash.add(entry.hash);
+    this.byHash.set(entry.hash, entry);
     return { accepted: true };
   }
 

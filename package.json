@@ -6,8 +6,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/test.js && node test/weave.test.js",
-    "demo:weave": "node demo/weave-demo.js"
+    "test": "node test/test.js && node test/weave.test.js && node test/queue.test.js",
+    "demo:weave": "node demo/weave-demo.js",
+    "demo:queue": "node demo/queue-demo.js"
   },
   "engines": {
     "node": ">=18"
