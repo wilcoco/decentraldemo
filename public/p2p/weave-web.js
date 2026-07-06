@@ -117,6 +117,44 @@ export class BrowserNode {
     this.byHash = new Map();
     this.forkProofs = new Map();
     this.maxDataBytes = 8192;
+    this._saveTimer = null;
+  }
+
+  // 영속화: 데이터베이스는 시민의 기기다. 내가 복제한 역사와 등록부를
+  // 이 브라우저에 저장한다 — 모든 피어가 꺼졌다 켜져도 각자가 역사를
+  // 지니고 돌아오므로 네트워크의 기억이 유실되지 않는다.
+  restore() {
+    try {
+      const reg = JSON.parse(localStorage.getItem('agora-registry') ?? '[]');
+      for (const [cid, pub] of reg) this.registry.set(cid, pub);
+      const interests = JSON.parse(localStorage.getItem('agora-interests') ?? '[]');
+      for (const t of interests) this.interests.add(t);
+      const saved = JSON.parse(localStorage.getItem('agora-entries') ?? '[]');
+      for (const e of saved) {
+        // 저장 당시 검증된 항목의 복원 — 구조만 재확인하고 그대로 적재
+        if (!e?.hash || this.byHash.has(e.hash)) continue;
+        let log = this.entries.get(e.author);
+        if (!log) this.entries.set(e.author, (log = new Map()));
+        log.set(e.seq, e);
+        this.byHash.set(e.hash, e);
+      }
+    } catch {
+      // 손상된 저장소는 무시 — 네트워크가 다시 채워 준다
+    }
+  }
+
+  _scheduleSave() {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      try {
+        localStorage.setItem('agora-entries', JSON.stringify([...this.byHash.values()]));
+        localStorage.setItem('agora-registry', JSON.stringify([...this.registry.entries()]));
+        localStorage.setItem('agora-interests', JSON.stringify([...this.interests]));
+      } catch {
+        // 저장소 초과(~5MB) 시 항목 저장을 포기 — 역사는 이웃이 보관한다
+      }
+    }, 400);
   }
 
   async ingest(entry) {
@@ -135,6 +173,7 @@ export class BrowserNode {
     }
     log.set(entry.seq, entry);
     this.byHash.set(entry.hash, entry);
+    this._scheduleSave();
     return { accepted: true };
   }
 
@@ -299,6 +338,7 @@ export class BrowserMesh {
     // 데모: 개방 등록 — 실제 시스템에서는 자격증명(DID/영지식) 검증 지점
     if (identity?.citizenId && identity?.publicKey && !this.node.registry.has(identity.citizenId)) {
       this.node.registry.set(identity.citizenId, identity.publicKey);
+      this.node._scheduleSave();
     }
     if (identity?.name) this.names.set(identity.citizenId, identity.name);
   }
@@ -333,6 +373,7 @@ export class BrowserMesh {
   follow(topicId) {
     if (this.node.interests.has(topicId)) return;
     this.node.interests.add(topicId);
+    this.node._scheduleSave();
     for (const peerId of this.channels.keys()) this._sendTo(peerId, this._helloMsg());
   }
 

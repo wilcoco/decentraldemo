@@ -25,14 +25,21 @@ let wallet = null;
 let node = null;
 let mesh = null;
 let currentTopic = null;
+const setCurrentTopic = (t) => {
+  currentTopic = t;
+  if (t) localStorage.setItem('agora-current-topic', t);
+};
 
 // ── 참여 (이름 → 지갑 생성/복원 → 메시 접속) ─────────────────
 async function boot(name) {
   wallet = await BrowserWallet.create(name);
   node = new BrowserNode({ id: wallet.name, interests: [CATALOG] });
+  node.restore(); // 이 기기에 저장된 역사·등록부·관심사 복원
   node.registry.set(wallet.citizenId, wallet.publicKey);
   mesh = new BrowserMesh({ node, wallet, onChange: render });
   mesh.connect(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/signal`);
+  const savedTopic = localStorage.getItem('agora-current-topic');
+  if (savedTopic && node.interests.has(savedTopic)) currentTopic = savedTopic;
   $('#join-overlay').classList.add('hidden');
   $('#my-info').textContent = `${wallet.name} · ${wallet.citizenId} (개인키는 이 브라우저에만 존재)`;
   render();
@@ -86,13 +93,13 @@ async function announce(title, description, charter) {
   const topicId = 't_' + sha256(`${title}|${wallet.citizenId}|${wallet.seq}`).slice(0, 12);
   mesh.follow(topicId);
   await mesh.act(CATALOG, 'PROPOSE', { title, body: description, topicId, charter });
-  currentTopic = topicId;
+  setCurrentTopic(topicId);
 }
 
 async function expressInterest(announceId) {
   const announce = node.byHash.get(announceId);
   mesh.follow(announce.data.topicId);
-  currentTopic = announce.data.topicId;
+  setCurrentTopic(announce.data.topicId);
   await mesh.act(CATALOG, 'JOIN', { opinionId: announceId, behind: tips(node, announceId) });
 }
 
@@ -162,7 +169,7 @@ function renderCatalog() {
     el.addEventListener('click', () => {
       const t = el.dataset.open;
       if (node.interests.has(t)) {
-        currentTopic = t;
+        setCurrentTopic(t);
         render();
       }
     })
