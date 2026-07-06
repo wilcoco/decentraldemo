@@ -26,7 +26,11 @@ import { queueState } from './queue.js';
 
 // 주제들의 모든 줄에서 시민별 안목 지수를 계산한다.
 // 결정적 계산 — 같은 항목 집합이면 어느 노드가 계산해도 동일하다.
-export function computeInsight(node, topicIds) {
+// opts.halfLifeMs: 시간 감쇠 반감기 (미헬스의 과두제 철칙 대응 — 과거의
+// 영광이 영원히 무거운 목소리가 되지 않도록, 오래된 안목의 무게를 줄인다.
+// 이것 역시 "레그 제거"의 연장이다: 평판에도 임기가 없어야 하듯 종신 권력도 없어야 한다)
+export function computeInsight(node, topicIds, opts = {}) {
+  const { halfLifeMs = null, now = Date.now() } = opts;
   const topics = topicIds ?? [...node.interests];
   const flagged = new Set(node.forkProofs.keys());
   const perLine = new Map(); // author -> Map(opinionId -> 뒤에 선 사람 수)
@@ -90,9 +94,14 @@ export function computeInsight(node, topicIds) {
           // 판단을 철회하고 줄을 떠나면(LEAVE) 감점도 사라진다 — 획득한
           // 후손 점수(역사)는 남는다.
           const penalty = currentSide.has(author) ? losingMargin[side] : 0;
+          let score = laterAuthors.size - penalty;
+          if (halfLifeMs) {
+            // 시간 감쇠: 내가 그 줄에 선 시점이 오래될수록 무게가 반감한다
+            score *= Math.pow(0.5, Math.max(0, now - entry.ts) / halfLifeMs);
+          }
           let m = perLine.get(author);
           if (!m) perLine.set(author, (m = new Map()));
-          m.set(lineKey, laterAuthors.size - penalty);
+          m.set(lineKey, score);
         }
       }
     }
@@ -109,16 +118,57 @@ export function computeInsight(node, topicIds) {
 
 // 의견 권위 지수: 현재 줄에 서 있는 시민들의 (1 + 안목 지수) 합.
 // 같은 길이의 줄이라도 안목이 검증된 시민들이 선 줄의 권위가 높다.
-// 반대 줄에도 같은 계산을 적용한다(authorityAgainst) — 몇 명이 반대하는가만이
-// 아니라 "어떤 안목의 시민들이 반대하는가"가 함께 보인다.
-export function authorityIndex(node, topicId) {
-  const { citizenHub } = computeInsight(node);
+// 반대 줄에도 같은 계산을 적용한다(authorityAgainst).
+//
+// opts.cap: 안목 가중 상한 (홍-페이지/랑드모어: 다양성이 능력을 이긴다 —
+//   아무리 안목이 높아도 한 사람의 목소리는 기본표의 (1+cap)배를 넘지 못한다.
+//   밀의 복수 투표가 실패한 자리에서 멈추는 안전장치)
+// opts.queueOpts: 거버넌스 파라미터 (헌장 임계값·지속 조건·배심·블라인드)
+// opts.halfLifeMs: 안목 시간 감쇠
+//
+// diversity(관점 다양성 지표): 이 줄에 선 시민들이 "평소에도 같이 다니는
+// 무리"인지 "다양한 사람들"인지 — 지지자들의 주제 내 입장 프로필 간
+// 평균 자카드 유사도의 보수(1-유사도). 높을수록 다양한 연합이다.
+export function authorityIndex(node, topicId, opts = {}) {
+  const { cap = 2, halfLifeMs = null, queueOpts = {} } = opts;
+  const { citizenHub } = computeInsight(node, undefined, { halfLifeMs });
   // 기본 1표는 불가침(1인 1목소리) — 안목이 음수여도 목소리가 1 아래로
-  // 깎이지는 않는다. 음수 안목은 가중 보너스가 없다는 뜻일 뿐이다.
-  const sum = (authors) => authors.reduce((acc, author) => acc + 1 + Math.max(0, citizenHub.get(author) ?? 0), 0);
-  return queueState(node, topicId).opinions.map((op) => ({
+  // 깎이지 않고, 상한을 넘는 안목도 cap에서 멈춘다.
+  const voice = (author) => 1 + Math.min(cap, Math.max(0, citizenHub.get(author) ?? 0));
+  const state = queueState(node, topicId, queueOpts);
+
+  // 시민별 입장 프로필 (다양성 계산용): 이 주제에서 서 있는 의견들의 집합
+  const profile = new Map();
+  for (const op of state.opinions) {
+    for (const a of [...op.standers, ...op.opposers]) {
+      if (!profile.has(a)) profile.set(a, new Set());
+      profile.get(a).add(op.id);
+    }
+  }
+  const diversityOf = (authors, selfId) => {
+    if (authors.length < 2) return null;
+    let sum = 0;
+    let pairs = 0;
+    for (let i = 0; i < authors.length; i++) {
+      for (let j = i + 1; j < authors.length; j++) {
+        const A = new Set([...(profile.get(authors[i]) ?? [])].filter((x) => x !== selfId));
+        const B = new Set([...(profile.get(authors[j]) ?? [])].filter((x) => x !== selfId));
+        const union = new Set([...A, ...B]);
+        if (union.size === 0) continue; // 이 줄 외의 행적이 없는 쌍은 판단 불가
+        let inter = 0;
+        for (const x of A) if (B.has(x)) inter += 1;
+        sum += inter / union.size;
+        pairs += 1;
+      }
+    }
+    return pairs ? 1 - sum / pairs : null;
+  };
+
+  return state.opinions.map((op) => ({
     ...op,
-    authority: sum(op.standers),
-    authorityAgainst: sum(op.opposers),
+    // 위임된 표는 기본 1표로 실린다 (위임자의 안목은 사슬을 타지 않는다)
+    authority: op.standers.reduce((acc, a) => acc + voice(a), 0) + op.delegatedSupport,
+    authorityAgainst: op.opposers.reduce((acc, a) => acc + voice(a), 0) + op.delegatedOppose,
+    diversity: diversityOf(op.standers, op.id),
   }));
 }

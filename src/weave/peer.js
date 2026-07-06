@@ -43,6 +43,8 @@ export class Peer {
     credential = null, // 내 지갑의 자격증명 (HELLO/REGISTRY로 함께 전파된다)
     rateLimit = { max: 60, perMs: 60_000 }, // 작성자별 수용 속도 상한 (스팸 방어)
     maxLineBytes = 512 * 1024, // 수신 메시지 한 줄 상한 (메모리 폭탄 방어)
+    region = null, // 이 피어의 기본 지역 (중첩 연방화 — 오스트롬)
+    governance = {}, // 거버넌스 파라미터 (docs/theory-review.md 로드맵)
   }) {
     this.id = id;
     this.wallet = wallet; // 이 클라이언트 소유 시민의 지갑 — 개인키는 이 프로세스 밖으로 나가지 않는다
@@ -57,6 +59,15 @@ export class Peer {
     this.issuers = issuers;
     this.credential = credential;
     this.maxLineBytes = maxLineBytes;
+    this.region = region;
+    // 거버넌스 기본값: 일반 의제 vs 헌장 의제 (토크빌·매디슨·콩도르세·피시킨)
+    this.governance = {
+      blindMs: 0, // 블라인드 초기 구간 (콩도르세: 정보 폭포 차단)
+      sustainMs: 0, // 지속 다수 조건 (매디슨: 저역 필터)
+      jurySize: 0, // 무작위 검증 배심 (피시킨·랑드모어)
+      charter: { adopt: 2 / 3, sustainFactor: 3 }, // 헌장 의제: 상위 임계값 + 3배 유지 기간
+      ...governance,
+    };
     this.names = new Map(); // citizenId -> 이름 (표시용, 신뢰 근거 아님)
     if (wallet) this.names.set(wallet.citizenId, wallet.name);
     this.credentials = new Map(); // citizenId -> credential (재전파용)
@@ -290,11 +301,35 @@ export class Peer {
 
   // ── 전체 이슈 조회 (카탈로그) ─────────────────────────────
   // 새 이슈를 만들고 카탈로그에 공표한다. 공표 항목이 그 이슈의 "관심 줄" 머리가 된다.
-  announceTopic({ title, description = '', domain = '' }) {
+  // region: 지역 의제 표시 (중첩 연방화의 1단계 — 카탈로그에서 지역별 필터).
+  // charter: 헌장 의제 표시 — 기본권·참여 규칙 등은 상위 임계값과 더 긴 지속
+  // 기간을 요구한다. 공표 항목은 불변이므로 헌장 표시는 사후에 뗄 수 없다
+  // (자기 수정 잠금의 최소 형태).
+  announceTopic({ title, description = '', domain = '', region = null, charter = false }) {
     const topicId = 't_' + sha256(`${title}|${this.wallet.citizenId}|${this.wallet.seq}`).slice(0, 12);
     this.follow(topicId); // 만든 사람은 당연히 구독
-    const entry = this.act(CATALOG, 'PROPOSE', { title, body: description, topicId, domain });
+    const entry = this.act(CATALOG, 'PROPOSE', {
+      title,
+      body: description,
+      topicId,
+      domain,
+      region: region ?? this.region,
+      charter: Boolean(charter),
+    });
     return { topicId, announceId: entry.hash };
+  }
+
+  // 이 주제에 적용되는 거버넌스 파라미터: 헌장 의제면 상위 임계값과 긴 유지 기간
+  topicOpts(topicId) {
+    const announce = [...this.node.byHash.values()].find(
+      (e) => e.topicId === CATALOG && e.type === 'PROPOSE' && e.data.topicId === topicId
+    );
+    const g = this.governance;
+    const base = { blindMs: g.blindMs, sustainMs: g.sustainMs, jurySize: g.jurySize };
+    if (announce?.data.charter) {
+      return { ...base, adopt: g.charter.adopt, sustainMs: g.sustainMs * g.charter.sustainFactor };
+    }
+    return base;
   }
 
   // 네트워크에 존재하는 전체 이슈 목록: 카탈로그를 접으면 나온다.
@@ -309,6 +344,8 @@ export class Peer {
           title: o.title,
           description: o.body,
           domain: announce?.data.domain ?? '',
+          region: announce?.data.region ?? null,
+          charter: Boolean(announce?.data.charter),
           announceId: o.id,
           interest: o.weight,
           standers: o.standers,
@@ -354,7 +391,7 @@ export class Peer {
     }
     for (const topicId of this.node.interests) {
       if (topicId === CATALOG) continue;
-      for (const op of authorityIndex(this.node, topicId)) {
+      for (const op of authorityIndex(this.node, topicId, { queueOpts: this.topicOpts(topicId) })) {
         if (`${op.title} ${op.body}`.toLowerCase().includes(kw)) {
           const cat = catalogItems.find((c) => c.topicId === topicId);
           results.push({
@@ -414,6 +451,16 @@ export class Peer {
     const data = { opinionId, behind };
     if (comment) data.comment = String(comment);
     return this.act(topicId, 'OPPOSE', data);
+  }
+
+  // 주제 위임 (다운스: 합리적 무지의 해법) — 즉시 회수 가능
+  delegate(topicId, toCitizenId = null) {
+    return this.act(topicId, 'DELEGATE', { to: toCitizenId });
+  }
+
+  // 배심 판정 제출 (내가 그 의견의 추첨 배심원일 때만 유효하게 집계된다)
+  submitVerdict(topicId, opinionId, approve, reason = '') {
+    return this.act(topicId, 'VERDICT', { opinionId, approve: Boolean(approve), reason });
   }
 
   // ── 시민 행위: 로컬 서명 후 즉시 전파 ─────────────────────
