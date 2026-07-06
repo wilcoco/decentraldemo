@@ -198,8 +198,24 @@ export class BrowserMesh {
   }
 
   connect(signalUrl) {
-    this.ws = new WebSocket(signalUrl);
-    this.ws.onmessage = async (ev) => {
+    this.signalUrl = signalUrl;
+    this.wsState = '연결 중';
+    this._dialSignal();
+    this.timer = setInterval(() => this._gossip(), this.gossipMs);
+    // 하트비트: 프록시의 유휴 타임아웃으로 신호 회선이 끊기는 것을 막는다
+    this.heartbeat = setInterval(() => {
+      if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ type: 'ping' }));
+    }, 20_000);
+  }
+
+  _dialSignal() {
+    const ws = new WebSocket(this.signalUrl);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.wsState = '연결됨';
+      this.onChange();
+    };
+    ws.onmessage = async (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'welcome') {
         this.myId = msg.id;
@@ -210,7 +226,15 @@ export class BrowserMesh {
       }
       // peer-joined는 상대가 나에게 offer를 걸어오므로 대기만 한다
     };
-    this.timer = setInterval(() => this._gossip(), this.gossipMs);
+    // 신호 회선이 끊겨도 이미 성립된 WebRTC 연결은 계속 산다.
+    // 새 참여자를 만나기 위해 자동으로 재접속한다.
+    ws.onclose = () => {
+      if (this.stopped) return;
+      this.wsState = '재연결 중';
+      this.onChange();
+      setTimeout(() => this._dialSignal(), 3000);
+    };
+    ws.onerror = () => ws.close();
   }
 
   _pc(peerId) {
@@ -223,6 +247,7 @@ export class BrowserMesh {
     };
     pc.ondatachannel = (e) => this._setupChannel(peerId, e.channel);
     pc.onconnectionstatechange = () => {
+      this.onChange(); // 협상 상태를 UI에 반영 (new/connecting/connected/failed)
       if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
         this.pcs.delete(peerId);
         this.channels.delete(peerId);

@@ -161,6 +161,19 @@ server.on('upgrade', (req, socket) => {
   });
 });
 
+// 유휴 연결 유지: 주기적 ping — 프록시(Railway 등)의 유휴 타임아웃을 막고,
+// 죽은 소켓은 쓰기 실패로 정리된다
+setInterval(() => {
+  for (const [id, { socket }] of clients) {
+    try {
+      if (socket.destroyed) clients.delete(id);
+      else socket.write(Buffer.from([0x89, 0x00])); // WS ping 프레임
+    } catch {
+      clients.delete(id);
+    }
+  }
+}, 25_000);
+
 server.listen(PORT, () => {
   console.log('아고라 라이브 — 브라우저 P2P 신호 서버');
   console.log(`http://localhost:${PORT} 를 브라우저 여러 개에서 여세요 (각 탭/기기가 피어가 됩니다)`);

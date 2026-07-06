@@ -24,6 +24,17 @@ const GOV = {
 let wallet = null;
 let node = null;
 let mesh = null;
+let dupTab = false;
+// 같은 브라우저(같은 localStorage)의 다른 탭 감지 — 두 탭이 지갑을 공유하면
+// 서명 순번이 충돌해 자기 자신을 이중 발언자로 만든다. 경고로 안내한다.
+try {
+  const bc = new BroadcastChannel('agora-tab');
+  bc.onmessage = (e) => {
+    if (e.data === 'hello?') bc.postMessage('here');
+    if (e.data === 'here') { dupTab = true; if (typeof render === 'function' && node) render(); }
+  };
+  bc.postMessage('hello?');
+} catch { /* BroadcastChannel 미지원 브라우저 */ }
 let currentTopic = null;
 const setCurrentTopic = (t) => {
   currentTopic = t;
@@ -133,12 +144,27 @@ function render() {
 function renderNet() {
   const pill = $('#net-status');
   const n = mesh.channels.size;
-  pill.textContent = n > 0 ? `피어 ${n}명과 직접 연결됨 · 시민 ${node.registry.size}명` : '피어 대기 중 (다른 브라우저에서 접속하면 연결됩니다)';
-  pill.className = `pill ${n > 0 ? 'ok' : ''}`;
-  $('#peers-list').innerHTML =
-    [...mesh.channels.entries()]
-      .map(([, ch]) => `<div class="peer-row"><b>${esc(ch.hello?.id ?? '협상 중…')}</b> — WebRTC 직접 연결</div>`)
-      .join('') || '<div class="peer-row">아직 연결된 피어가 없습니다</div>';
+  if (mesh.wsState !== '연결됨') {
+    pill.textContent = `신호 서버 ${mesh.wsState ?? '연결 중'}…`;
+    pill.className = 'pill';
+  } else if (n > 0) {
+    pill.textContent = `피어 ${n}명과 직접 연결됨 · 시민 ${node.registry.size}명`;
+    pill.className = 'pill ok';
+  } else {
+    pill.textContent = '신호 연결됨 · 다른 참여자 대기 중';
+    pill.className = 'pill';
+  }
+  // 진단: WebRTC 협상 단계까지 보여준다 (막히는 지점 식별용)
+  const ICE_LABEL = { new: '협상 준비', connecting: 'ICE 협상 중', connected: '직접 연결됨', failed: '연결 실패(NAT — 중계 필요)', disconnected: '끊김', closed: '종료' };
+  const rows = [];
+  for (const [peerId, pc] of mesh.pcs) {
+    const ch = mesh.channels.get(peerId);
+    const name = ch?.hello?.id ?? peerId;
+    const state = ch ? '직접 연결됨 (데이터 P2P)' : (ICE_LABEL[pc.connectionState] ?? pc.connectionState);
+    rows.push(`<div class="peer-row"><b>${esc(name)}</b> — ${state}</div>`);
+  }
+  if (dupTab) rows.unshift('<div class="peer-row" style="color:var(--warn)">⚠ 같은 브라우저의 다른 탭에서 이미 참여 중 — 두 탭이 같은 지갑을 공유해 서명 순번이 충돌합니다(자신이 이중 발언자로 표시될 수 있음). 시크릿 창이나 다른 기기를 쓰세요.</div>');
+  $('#peers-list').innerHTML = rows.join('') || '<div class="peer-row">아직 연결된 피어가 없습니다</div>';
 }
 
 function renderCatalog() {
