@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>아고라 라이브 — 브라우저 P2P 시민 클라이언트</title>
+  <link rel="stylesheet" href="/p2p/style.css" />
+</head>
+<body>
+  <div id="join-overlay">
+    <div class="card join-card">
+      <h1>아고라 라이브</h1>
+      <p>이 브라우저가 곧 당신의 시민 클라이언트입니다.<br />
+        키는 이 기기에서 생성되어 이 기기를 떠나지 않습니다.</p>
+      <form id="join-form">
+        <input id="join-name" placeholder="이름 (가명 가능)" required />
+        <button class="btn primary" type="submit">시민으로 참여</button>
+      </form>
+    </div>
+  </div>
+
+  <header>
+    <div class="brand">
+      <h1>아고라 라이브 <span class="tag">브라우저 피어</span></h1>
+      <p id="my-info"></p>
+    </div>
+    <div id="net-status" class="pill">연결 중…</div>
+  </header>
+
+  <main>
+    <aside id="left">
+      <div class="card">
+        <h2>전체 이슈 <small>(카탈로그 — 모두가 목차를 가진다)</small></h2>
+        <input id="catalog-filter" placeholder="키워드 검색" />
+        <div id="catalog-list"></div>
+      </div>
+      <div class="card">
+        <h3>새 이슈 공표</h3>
+        <form id="announce-form">
+          <input id="announce-title" placeholder="이슈 제목" required />
+          <input id="announce-desc" placeholder="설명 (선택)" />
+          <label class="check"><input type="checkbox" id="announce-charter" /> 헌장 의제 (채택 2/3 + 3배 유지)</label>
+          <button class="btn primary" type="submit">네트워크에 공표</button>
+        </form>
+      </div>
+    </aside>
+
+    <section id="center">
+      <div id="topic-header"><p class="hint">왼쪽에서 이슈를 구독하거나 새로 공표하세요.</p></div>
+      <div id="delegation-box" class="card hidden">
+        <label>이 이슈의 내 목소리:</label>
+        <select id="delegate-select"></select>
+        <span class="hint">직접 참여하면 위임보다 항상 우선합니다</span>
+      </div>
+      <div id="opinions"></div>
+      <form id="propose-form" class="card hidden">
+        <h3>새 의견 제안 (줄의 머리가 됩니다)</h3>
+        <input id="propose-title" placeholder="주장 한 줄 요약" required />
+        <textarea id="propose-body" placeholder="구체적 내용과 논거"></textarea>
+        <button class="btn primary" type="submit">제안하기</button>
+      </form>
+    </section>
+
+    <aside id="right">
+      <div class="card">
+        <h2>안목 지수 <small>(일찍 알아본 기록)</small></h2>
+        <div id="insight-list"></div>
+      </div>
+      <div class="card">
+        <h2>네트워크</h2>
+        <div id="peers-list"></div>
+        <p class="hint">신호 서버는 연결만 중개하며 데이터를 보지 못합니다.
+          연결 후 모든 항목은 브라우저 사이를 직접 흐릅니다.</p>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="/p2p/app.js"></script>
+</body>
+</html>

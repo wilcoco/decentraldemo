@@ -19,7 +19,7 @@ import { WeaveNode } from './node.js';
 import { queueState, tips } from './queue.js';
 import { authorityIndex } from './insight.js';
 import { verifyCredential } from './identity.js';
-import { sha256 } from '../blockchain.js';
+import { sha256 } from './hash.js';
 
 // 카탈로그(목차) 주제 — 모든 피어가 기본으로 복제하는 예약 주제.
 // "본문은 관심 있는 것만, 목차는 모두가": 이슈의 존재를 알리는 공표(ANNOUNCE)

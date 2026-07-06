@@ -26,8 +26,8 @@
 //  - 위임 (다운스: 합리적 무지의 해법) — 주제 단위로 신뢰하는 시민에게
 //    목소리를 위임한다. 직접 참여가 위임을 항상 우선하고, 순환은 차단되며,
 //    즉시 회수된다.
-import { THRESHOLDS } from '../democracy.js';
-import { sha256 } from '../blockchain.js';
+import { THRESHOLDS } from './consts.js';
+import { sha256 } from './hash.js';
 
 const QUEUE_TYPES = new Set(['PROPOSE', 'AMEND', 'JOIN', 'OPPOSE', 'LEAVE', 'DELEGATE']);
 const SIDE_TYPE = { support: 'JOIN', oppose: 'OPPOSE' };

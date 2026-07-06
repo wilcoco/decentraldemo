@@ -10,7 +10,8 @@
 //    내용을 서명해 진영마다 다른 말을 하는 것)이며, 이는 두 항목만 맞대면
 //    암호학적으로 증명되는 배신이다. 합의 대신 "탐지와 책임"으로 대체한다.
 import { createSign, createVerify } from 'node:crypto';
-import { generateKeyPair, sha256 } from '../blockchain.js';
+import { generateKeyPair } from '../blockchain.js';
+import { sha256 } from './hash.js';
 
 // 서명 대상 직렬화 (키 순서 고정)
 export function canonical(e) {

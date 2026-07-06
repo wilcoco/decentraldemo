@@ -13,11 +13,9 @@ import { generateKeyPair, signTransaction, TrustChain } from './blockchain.js';
 let seq = 0;
 const nextId = (prefix) => `${prefix}_${(++seq).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-// 의견 지위 판정 기준 (전체 시민 대비 유효 지지 가중치 비율)
-export const THRESHOLDS = {
-  adopt: 0.5, // 이 비율 이상 + 검증됨 → 채택
-  leading: 0.25, // 이 비율 이상 → 우세
-};
+// 의견 지위 판정 기준은 공용 상수로 이동 (src/weave/consts.js)
+import { THRESHOLDS } from './weave/consts.js';
+export { THRESHOLDS };
 
 export class Democracy {
   constructor({ chain } = {}) {

@@ -11,7 +11,8 @@
     "demo:queue": "node demo/queue-demo.js",
     "demo:insight": "node demo/insight-demo.js",
     "demo:p2p": "node demo/p2p-demo.js",
-    "peer": "node bin/peer.js"
+    "peer": "node bin/peer.js",
+    "web": "node bin/signal.js"
   },
   "engines": {
     "node": ">=18"
