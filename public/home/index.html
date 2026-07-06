@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="임기 없는 실시간 민주주의 — 지지는 언제든 철회되고, 모든 지위는 매 순간 다시 계산됩니다. 서버 없이, 브라우저끼리 직접." />
+  <title>아고라 라이브 — 임기 없는 실시간 민주주의</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0e1117; --panel: #161b24; --card: #1c2331; --border: #2a3446;
+      --text: #e6ebf4; --muted: #8b96a8; --accent: #4f8cff; --ok: #2ecc71; --warn: #f0a832;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+      line-height: 1.7;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+    .hero { text-align: center; padding: 88px 0 64px; }
+    .hero h1 { font-size: 2.6rem; letter-spacing: -0.02em; }
+    .hero .sub { color: var(--accent); font-size: 1.15rem; margin: 10px 0 22px; }
+    .hero p { color: var(--muted); max-width: 620px; margin: 0 auto 34px; }
+    .cta {
+      display: inline-block; background: var(--accent); color: #fff; text-decoration: none;
+      padding: 15px 42px; border-radius: 12px; font-size: 1.1rem; font-weight: 600;
+    }
+    .cta:hover { filter: brightness(1.1); }
+    .cta-note { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 12px; }
+    section { padding: 44px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 1.5rem; margin-bottom: 18px; }
+    h3 { font-size: 1.05rem; margin: 20px 0 6px; color: var(--accent); }
+    p { color: var(--text); margin-bottom: 12px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 18px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .card h3 { margin-top: 0; }
+    .card p { font-size: 0.88rem; color: var(--muted); margin: 0; }
+    blockquote {
+      border-left: 3px solid var(--accent); padding: 6px 18px; margin: 18px 0;
+      color: var(--text); font-size: 1.05rem; background: var(--panel); border-radius: 0 10px 10px 0;
+    }
+    code, pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; }
+    code { padding: 2px 7px; }
+    pre { padding: 14px; overflow-x: auto; margin: 10px 0; }
+    footer { border-top: 1px solid var(--border); padding: 30px 0 46px; color: var(--muted); font-size: 0.82rem; text-align: center; }
+    a { color: var(--accent); }
+    .steps li { margin: 8px 0 8px 22px; color: var(--text); }
+    .warn-note { color: var(--warn); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>아고라 라이브</h1>
+      <div class="sub">임기 없는 실시간 민주주의</div>
+      <p>투표로 왕을 뽑는다고 민주주의가 되지 않듯, 몇 년에 한 번의 선출로
+        민의가 대변되지 않습니다. 여기서는 지지가 언제든 철회되고, 모든 결정의
+        지위가 매 순간 다시 계산됩니다 — 서버 없이, 시민의 브라우저끼리 직접.</p>
+      <a class="cta" href="/app">지금 참여하기 — 이 브라우저가 곧 나의 시민 단말</a>
+      <span class="cta-note">설치·가입·다운로드 없음. 키는 당신의 기기에서 생성되어 기기를 떠나지 않습니다.</span>
+    </div>
+
+    <section>
+      <h2>왜 만들었나</h2>
+      <p>임기제 선출은 선출 시점의 여론을 임기 내내 고정합니다. 이 <b>레그(lag)</b>가
+        포퓰리즘, 책임 회피, 민의와 권력의 괴리를 낳습니다. 이 시스템은 레그를 제거합니다:</p>
+      <blockquote>지위는 어디에도 저장되지 않는다.<br />
+        지지가 빠지면 그 순간 채택도 사라진다. 권력이 아니라
+        <b>이의 제기 가능성이 상설화된 체제</b>.</blockquote>
+      <div class="grid">
+        <div class="card"><h3>지지는 줄서기다</h3>
+          <p>의견 뒤에 줄을 서며 앞사람을 서명으로 확인합니다. 참여가 곧 검증 —
+            줄이 길수록 기록을 지우기 어렵습니다. 반대도 똑같은 줄입니다.</p></div>
+        <div class="card"><h3>안목이 평판이 된다</h3>
+          <p>좋은 의견을 일찍 알아본 기록이 위조 불가능한 안목 지수가 됩니다.
+            헛발질하면 깎이고, 시간이 지나면 감쇠하며, 기본 1표는 불가침입니다.</p></div>
+        <div class="card"><h3>서버가 없다</h3>
+          <p>모든 데이터는 브라우저 사이를 WebRTC로 직접 흐릅니다. 이 사이트는
+            연결만 중개하는 전화번호부로, 누가 무엇을 지지하는지 볼 수 없습니다.</p></div>
+        <div class="card"><h3>속도에 필터를 달았다</h3>
+          <p>블라인드 초기 구간(정보 폭포 차단), 지속 다수(순간 격정 여과),
+            헌장 의제(다수의 폭정 방어), 추첨 배심(동원 불가능한 심사) —
+            민주주의 이론사의 처방을 코드로 구현했습니다.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>어떻게 참여하나</h2>
+      <ol class="steps">
+        <li><a href="/app">참여하기</a>를 누르고 이름(가명 가능)을 정합니다 — 키가 브라우저 안에서 생성됩니다.</li>
+        <li><b>전체 이슈</b>에서 관심 있는 의제를 구독하거나, 새 이슈를 직접 공표합니다.</li>
+        <li>의견을 제안하고, 남의 의견에 <b>자기 의견을 첨부해 지지·반대</b>합니다.
+          생각이 바뀌면 언제든 줄에서 떠나면 됩니다 — 그 순간 집계가 바뀝니다.</li>
+        <li>바쁜 분야는 신뢰하는 시민에게 <b>위임</b>하세요. 직접 참여하는 순간 위임보다 우선하고, 언제든 회수됩니다.</li>
+      </ol>
+      <p class="muted">같은 주소를 연 모든 브라우저(다른 기기 포함)가 서로 직접 연결된 하나의
+        시민 네트워크가 됩니다.</p>
+    </section>
+
+    <section>
+      <h2>상시 노드를 운영하고 싶다면</h2>
+      <p class="muted">브라우저 피어만으로도 참여는 충분하지만, 네트워크의 기억을 지키는
+        상시 노드(터미널 클라이언트)를 운영할 수 있습니다:</p>
+      <pre>git clone https://github.com/wilcoco/decentraldemo
+cd decentraldemo
+node bin/peer.js --name 홍길동 --port 4001   # 상시 P2P 노드</pre>
+      <p class="muted">소스 전체가 공개되어 있으며 외부 의존성이 없습니다(Node.js 18+).
+        집계 규칙은 브라우저와 노드가 같은 코드를 쓰므로, 누구든 모든 계산을 재검증할 수 있습니다.</p>
+    </section>
+
+    <section>
+      <h2>정직한 안내</h2>
+      <p class="warn-note">이것은 데모입니다.</p>
+      <p class="muted">신원은 현재 개방 등록이라 1인 다계정을 막지 못합니다(실제 운용에는
+        본인인증 → 익명 가명 발급의 2단 구조가 들어갑니다). 키는 브라우저 저장소에 보관되고,
+        서로 다른 통신사 NAT 뒤의 기기 간에는 연결 중계(TURN)가 추가로 필요할 수 있습니다.
+        설계 철학·보안 분석·민주주의 이론 검토 전문은
+        <a href="https://github.com/wilcoco/decentraldemo">저장소의 docs/</a>에 있습니다.</p>
+    </section>
+
+    <footer>
+      아고라 라이브 — 실시간 민주주의 실험 · 안목 지수는 발명자 홍정수의
+      등록특허 10-0913256 / 10-0952391(존속기간 만료, 자유 실시)에 기반합니다.
+    </footer>
+  </div>
+</body>
+</html>

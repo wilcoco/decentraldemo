@@ -19,7 +19,11 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : 8080);
+const PORT = Number(
+  process.argv.includes('--port')
+    ? process.argv[process.argv.indexOf('--port') + 1]
+    : process.env.PORT ?? 8080
+);
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -31,10 +35,17 @@ const MIME = {
 // ── 정적 파일: /p2p 앱과, 브라우저가 직접 import 하는 공용 코어(/src/weave) ──
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  let pathname = url.pathname === '/' ? '/public/p2p/index.html' : url.pathname;
+  let pathname = url.pathname;
+  if (pathname === '/') pathname = '/public/home/index.html'; // 안내 홈페이지 (취지 설명)
+  else if (pathname === '/app') pathname = '/public/p2p/index.html'; // 피어 앱 — 접속 즉시 참여
   if (pathname.startsWith('/p2p/')) pathname = '/public' + pathname;
-  // 허용 경로: 브라우저 앱과 공용 코어만 (그 외는 차단)
-  if (!pathname.startsWith('/public/p2p/') && !pathname.startsWith('/src/weave/')) {
+  if (pathname.startsWith('/home/')) pathname = '/public' + pathname;
+  // 허용 경로: 안내 페이지, 브라우저 앱, 공용 코어만 (그 외는 차단)
+  if (
+    !pathname.startsWith('/public/p2p/') &&
+    !pathname.startsWith('/public/home/') &&
+    !pathname.startsWith('/src/weave/')
+  ) {
     res.writeHead(404);
     return res.end('없음');
   }
