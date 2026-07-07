@@ -153,6 +153,9 @@ server.on('upgrade', (req, socket) => {
         // 유일한 기능: 지목된 상대에게 신호를 전달한다. 내용은 해석하지 않는다.
         if (msg.type === 'signal' && clients.has(msg.to)) {
           wsSend(clients.get(msg.to).socket, { type: 'signal', from: id, payload: msg.payload });
+        } else if (msg.type === 'who') {
+          // 회복 루프: 현재 방의 피어 목록을 알려준다 — 끊긴 WebRTC를 다시 잇는 데 쓰인다
+          wsSend(socket, { type: 'peers', peers: [...clients.keys()].filter((x) => x !== id) });
         }
       } catch {
         // 깨진 메시지 무시

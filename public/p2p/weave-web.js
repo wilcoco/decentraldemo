@@ -206,6 +206,11 @@ export class BrowserMesh {
     this.heartbeat = setInterval(() => {
       if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ type: 'ping' }));
     }, 20_000);
+    // 자가 회복 루프: 절전·네트워크 전환으로 WebRTC가 죽어도 스스로 아문다.
+    // 주기적으로 방의 피어 목록을 물어, 연결이 없는 피어에게 다시 건다.
+    this.repair = setInterval(() => {
+      if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ type: 'who' }));
+    }, 8000);
   }
 
   _dialSignal() {
@@ -223,6 +228,14 @@ export class BrowserMesh {
         for (const peerId of msg.peers) this._offer(peerId);
       } else if (msg.type === 'signal') {
         await this._onSignal(msg.from, msg.payload);
+      } else if (msg.type === 'peers') {
+        // 회복: 방에 있는데 나와 채널이 없는 피어 — id가 큰 쪽(나중 입장자)만
+        // 다시 걸어 양쪽 동시 제안 충돌(glare)을 피한다
+        const mine = Number(this.myId?.slice(1) ?? 0);
+        for (const peerId of msg.peers) {
+          if (this.pcs.has(peerId) || this.channels.has(peerId)) continue;
+          if (mine > Number(peerId.slice(1))) this._offer(peerId);
+        }
       }
       // peer-joined는 상대가 나에게 offer를 걸어오므로 대기만 한다
     };
@@ -263,22 +276,35 @@ export class BrowserMesh {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     this._signal(peerId, { sdp: pc.localDescription });
+    // 협상 타임아웃: 오래 걸리면 정리하고 회복 루프가 새로 시도하게 한다
+    setTimeout(() => {
+      if (!this.channels.has(peerId) && this.pcs.get(peerId) === pc) {
+        pc.close();
+        this.pcs.delete(peerId);
+        this.onChange();
+      }
+    }, 15_000);
   }
 
   async _onSignal(from, payload) {
     const pc = this._pc(from);
     if (payload.sdp) {
       await pc.setRemoteDescription(payload.sdp);
+      // 원격 설명 전에 도착해 대기 중이던 후보들을 반영
+      for (const c of pc._pending ?? []) {
+        try { await pc.addIceCandidate(c); } catch { /* 만료된 후보 */ }
+      }
+      pc._pending = [];
       if (payload.sdp.type === 'offer') {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         this._signal(from, { sdp: pc.localDescription });
       }
     } else if (payload.candidate) {
-      try {
-        await pc.addIceCandidate(payload.candidate);
-      } catch {
-        // 원격 설명 전 도착한 후보 — 무시해도 재협상으로 회복
+      if (pc.remoteDescription) {
+        try { await pc.addIceCandidate(payload.candidate); } catch { /* 만료된 후보 */ }
+      } else {
+        (pc._pending ??= []).push(payload.candidate); // 버리지 않고 버퍼링
       }
     }
   }

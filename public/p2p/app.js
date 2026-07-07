@@ -41,8 +41,27 @@ const setCurrentTopic = (t) => {
   if (t) localStorage.setItem('agora-current-topic', t);
 };
 
+// 같은 브라우저 프로필에서의 동시 실행 원천 차단 — 두 실행이 같은 지갑을
+// 공유하면 같은 순번에 다른 서명이 만들어져 스스로 이중 발언자가 된다.
+async function acquireSingleInstanceLock() {
+  if (!navigator.locks) return true; // 미지원 브라우저는 경고(BroadcastChannel)로 대체
+  return await new Promise((resolve) => {
+    navigator.locks.request('agora-app', { ifAvailable: true }, (lock) => {
+      resolve(Boolean(lock));
+      if (lock) return new Promise(() => {}); // 페이지가 살아 있는 동안 잠금 유지
+    });
+  });
+}
+
 // ── 참여 (이름 → 지갑 생성/복원 → 메시 접속) ─────────────────
 async function boot(name) {
+  if (!(await acquireSingleInstanceLock())) {
+    $('#join-overlay').classList.remove('hidden');
+    $('#join-overlay .join-card').innerHTML =
+      '<h1>이미 실행 중</h1><p>이 브라우저의 다른 탭/창에서 아고라 라이브가 이미 열려 있습니다.<br/>' +
+      '두 개를 동시에 쓰면 같은 지갑이 충돌해 이중 서명이 됩니다.<br/>기존 탭을 쓰시거나, 다른 기기·시크릿 창을 이용하세요.</p>';
+    return;
+  }
   wallet = await BrowserWallet.create(name);
   node = new BrowserNode({ id: wallet.name, interests: [CATALOG] });
   node.restore(); // 이 기기에 저장된 역사·등록부·관심사 복원
@@ -164,6 +183,21 @@ function renderNet() {
     rows.push(`<div class="peer-row"><b>${esc(name)}</b> — ${state}</div>`);
   }
   if (dupTab) rows.unshift('<div class="peer-row" style="color:var(--warn)">⚠ 같은 브라우저의 다른 탭에서 이미 참여 중 — 두 탭이 같은 지갑을 공유해 서명 순번이 충돌합니다(자신이 이중 발언자로 표시될 수 있음). 시크릿 창이나 다른 기기를 쓰세요.</div>');
+  if (node.forkProofs.has(wallet.citizenId)) {
+    rows.unshift(
+      '<div class="peer-row" style="color:var(--bad)">⚠ 이 지갑에 이중 서명 기록이 있어(과거 다중 실행 등) 네트워크가 이 시민의 모든 항목을 집계에서 제외 중입니다 — 내가 만든 이슈가 남에게 보이지 않는 원인입니다. ' +
+      '<button class="btn small danger" id="reset-wallet">새 시민으로 다시 시작</button></div>'
+    );
+  }
+  const resetBtn = document.getElementById('reset-wallet');
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      if (confirm('이 브라우저의 지갑과 저장 데이터를 지우고 새 시민으로 다시 참여합니다. 계속할까요?')) {
+        localStorage.clear();
+        location.reload();
+      }
+    };
+  }
   $('#peers-list').innerHTML = rows.join('') || '<div class="peer-row">아직 연결된 피어가 없습니다</div>';
 }
 
