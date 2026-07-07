@@ -25,7 +25,10 @@
       <h1>아고라 라이브 <span class="tag">브라우저 피어</span></h1>
       <p id="my-info"></p>
     </div>
-    <div id="net-status" class="pill">연결 중…</div>
+    <div class="header-right">
+      <button id="help-btn" class="btn small">❓ 사용법</button>
+      <div id="net-status" class="pill">연결 중…</div>
+    </div>
   </header>
 
   <main>
@@ -36,9 +39,10 @@
         <div id="catalog-list"></div>
       </div>
       <div class="card">
-        <h3>새 이슈 공표</h3>
+        <h3>➕ 새 이슈 만들기</h3>
+        <p class="hint">모든 참여자의 목록에 공표됩니다.</p>
         <form id="announce-form">
-          <input id="announce-title" placeholder="이슈 제목" required />
+          <input id="announce-title" placeholder="무엇을 논의할까요? (예: 연금 개혁)" required />
           <input id="announce-desc" placeholder="설명 (선택)" />
           <label class="check"><input type="checkbox" id="announce-charter" /> 헌장 의제 (채택 2/3 + 3배 유지)</label>
           <button class="btn primary" type="submit">네트워크에 공표</button>
@@ -47,11 +51,21 @@
     </aside>
 
     <section id="center">
+      <div id="guide" class="card guide hidden">
+        <h3>아고라 라이브, 3분 안내</h3>
+        <ol>
+          <li><b>이슈를 고르거나 만듭니다</b> — 왼쪽 <b>전체 이슈</b>에서 [구독하고 참여]를 누르거나, 새 이슈를 공표하세요. 모든 참여자의 목록에 자동으로 나타납니다.</li>
+          <li><b>의견을 내고, 논거와 함께 편에 섭니다</b> — 이슈마다 여러 의견(해결책)이 경쟁합니다. 👍 지지 / 👎 반대를 누르면 논거를 남길 수 있고, 고치고 싶으면 ✏️ 수정안을 낼 수 있습니다.</li>
+          <li><b>마음이 바뀌면 그냥 옮기세요</b> — 임기도 마감도 없습니다. 입장을 철회하거나 반대편에 서는 순간 집계가 실시간으로 바뀝니다. 바쁜 이슈는 신뢰하는 사람에게 <b>위임</b>하세요.</li>
+        </ol>
+        <p class="hint">이 모든 기록은 당신의 브라우저에서 서명되어 참여자들의 기기 사이를 직접 흐릅니다 — 중앙 서버 없음. 화면 곳곳의 <b>ⓘ</b>를 누르면 각 지표의 뜻을 볼 수 있습니다.</p>
+        <button id="guide-close" class="btn primary">알겠어요, 시작할게요</button>
+      </div>
       <div id="topic-header"><p class="hint">왼쪽에서 이슈를 구독하거나 새로 공표하세요.</p></div>
       <div id="delegation-box" class="card hidden">
-        <label>이 이슈의 내 목소리:</label>
+        <label>🗳 이 이슈의 내 목소리:</label>
         <select id="delegate-select"></select>
-        <span class="hint">직접 참여하면 위임보다 항상 우선합니다</span>
+        <span id="delegation-help"></span>
       </div>
       <div id="opinions"></div>
       <form id="propose-form" class="card hidden">
