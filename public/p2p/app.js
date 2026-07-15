@@ -183,24 +183,37 @@ function render() {
 
 function renderNet() {
   const pill = $('#net-status');
-  const n = mesh.channels.size;
+  const directCount = [...mesh.channels.values()].filter((c) => c.dc.readyState === 'open').length;
+  const relayOnly = [...mesh.roomPeers].filter((pid) => !mesh.channels.get(pid) || mesh.channels.get(pid).dc.readyState !== 'open');
+  const total = directCount + relayOnly.length;
   if (mesh.wsState !== '연결됨') {
     pill.textContent = `신호 서버 ${mesh.wsState ?? '연결 중'}…`;
     pill.className = 'pill';
-  } else if (n > 0) {
-    pill.textContent = `피어 ${n}명과 직접 연결됨 · 시민 ${node.registry.size}명`;
+  } else if (total > 0) {
+    pill.textContent = `피어 ${total}명 연결됨 · 시민 ${node.registry.size}명`;
     pill.className = 'pill ok';
   } else {
     pill.textContent = '신호 연결됨 · 다른 참여자 대기 중';
     pill.className = 'pill';
   }
-  const ICE_LABEL = { new: '협상 준비', connecting: 'ICE 협상 중', connected: '직접 연결됨', failed: '연결 실패(NAT — 중계 필요)', disconnected: '끊김', closed: '종료' };
   const rows = [];
-  for (const [peerId, pc] of mesh.pcs) {
-    const ch = mesh.channels.get(peerId);
-    const name = ch?.hello?.id ?? peerId;
-    const state = ch ? '직접 연결됨 (데이터 P2P)' : (ICE_LABEL[pc.connectionState] ?? pc.connectionState);
-    rows.push(`<div class="peer-row"><b>${esc(name)}</b> — ${state}</div>`);
+  // 직접(WebRTC) 연결 피어
+  for (const [peerId, ch] of mesh.channels) {
+    if (ch.dc.readyState !== 'open') continue;
+    rows.push(`<div class="peer-row"><b>${esc(ch.hello?.id ?? peerId)}</b> — 🔒 직접 연결 (서버가 못 봄)</div>`);
+  }
+  // 중계(서버 경유) 피어 — WebRTC가 아직/못 뚫린 경우
+  let relayShown = 0;
+  for (const peerId of relayOnly) {
+    const hello = mesh.relayPeers.get(peerId)?.hello;
+    const pc = mesh.pcs.get(peerId);
+    const negotiating = pc && !['failed', 'closed'].includes(pc.connectionState);
+    const label = negotiating ? '중계 연결 (직접 연결 시도 중…)' : '중계 연결 (서버 경유)';
+    rows.push(`<div class="peer-row"><b>${esc(hello?.id ?? peerId)}</b> — 🔁 ${label}</div>`);
+    relayShown++;
+  }
+  if (relayShown > 0) {
+    rows.push('<div class="peer-row" style="color:var(--warn);font-size:0.72rem">🔁 중계 연결은 서버를 거칩니다(같은 와이파이가 아니면 흔함). 항목은 여전히 서명되어 위조는 불가하지만, 직접 연결과 달리 서버가 내용을 볼 수 있습니다.</div>');
   }
   if (dupTab) {
     rows.unshift('<div class="peer-row" style="color:var(--warn)">⚠ 같은 브라우저의 다른 탭에서 이미 참여 중 — 같은 지갑이 충돌합니다. 시크릿 창이나 다른 기기를 쓰세요.</div>');

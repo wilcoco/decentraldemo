@@ -156,6 +156,13 @@ server.on('upgrade', (req, socket) => {
         } else if (msg.type === 'who') {
           // 회복 루프: 현재 방의 피어 목록을 알려준다 — 끊긴 WebRTC를 다시 잇는 데 쓰인다
           wsSend(socket, { type: 'peers', peers: [...clients.keys()].filter((x) => x !== id) });
+        } else if (msg.type === 'relay') {
+          // 폴백 중계: WebRTC 직접 연결이 NAT를 못 뚫을 때, 위브 메시지를 서버가
+          // 상대에게 전달한다. 이 경로에서는 서버가 데이터를 보게 되므로(직접
+          // 연결과 달리) 클라이언트는 WebRTC를 항상 우선하고, 중계는 최후 수단이다.
+          if (msg.to && clients.has(msg.to)) {
+            wsSend(clients.get(msg.to).socket, { type: 'relay', from: id, payload: msg.payload });
+          }
         }
       } catch {
         // 깨진 메시지 무시

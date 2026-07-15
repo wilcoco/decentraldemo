@@ -191,10 +191,51 @@ export class BrowserMesh {
     this.wallet = wallet;
     this.onChange = onChange;
     this.gossipMs = gossipMs;
-    this.channels = new Map(); // peerId -> { dc, hello }
+    this.channels = new Map(); // peerId -> { dc, hello } — WebRTC 직접 연결(선호)
     this.pcs = new Map(); // peerId -> RTCPeerConnection
+    this.roomPeers = new Set(); // 신호 서버가 알려준 같은 방의 피어 id들
+    this.relayPeers = new Map(); // peerId -> { hello } — 서버 경유 중계로만 닿는 피어
+    this.relayGreeted = new Set(); // 중계 HELLO를 이미 보낸 피어
     this.names = new Map([[wallet.citizenId, wallet.name]]);
     this.myId = null;
+  }
+
+  // 피어에게 전달: WebRTC 채널이 열려 있으면 직접(서버가 못 봄), 없으면 서버 중계
+  _deliver(peerId, msg) {
+    const ch = this.channels.get(peerId);
+    if (ch?.dc.readyState === 'open') {
+      ch.dc.send(JSON.stringify(msg));
+      return true;
+    }
+    if (this.roomPeers.has(peerId) && this.ws?.readyState === 1) {
+      this.ws.send(JSON.stringify({ type: 'relay', to: peerId, payload: msg }));
+      return true;
+    }
+    return false;
+  }
+
+  // 이 피어에 대해 내가 아는 HELLO (직접 우선, 없으면 중계)
+  _peerHello(peerId) {
+    return this.channels.get(peerId)?.hello ?? this.relayPeers.get(peerId)?.hello ?? null;
+  }
+
+  // 직접이든 중계든, 나와 대화 가능한 모든 피어 id
+  _reachablePeers() {
+    const ids = new Set();
+    for (const [pid, ch] of this.channels) if (ch.dc.readyState === 'open') ids.add(pid);
+    for (const pid of this.roomPeers) ids.add(pid);
+    return ids;
+  }
+
+  _noteRoomPeer(peerId) {
+    if (!peerId || peerId === this.myId) return;
+    this.roomPeers.add(peerId);
+    // 중계 인사: 이 피어와 아직 인사하지 않았으면 HELLO를 서버 경유로 보낸다.
+    // WebRTC가 나중에 뚫리면 그쪽이 우선되고 중계는 자연히 쓰이지 않는다.
+    if (!this.relayGreeted.has(peerId)) {
+      this.relayGreeted.add(peerId);
+      this._deliver(peerId, this._helloMsg());
+    }
   }
 
   connect(signalUrl) {
@@ -224,20 +265,29 @@ export class BrowserMesh {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'welcome') {
         this.myId = msg.id;
-        // 신규 입장자가 기존 피어들에게 연결을 건다 (충돌 없는 단방향 규칙)
-        for (const peerId of msg.peers) this._offer(peerId);
+        for (const peerId of msg.peers) {
+          this._noteRoomPeer(peerId); // 중계 경로 즉시 확보
+          this._offer(peerId); // WebRTC 직접 연결 시도 (되면 중계보다 우선)
+        }
+      } else if (msg.type === 'peer-joined') {
+        this._noteRoomPeer(msg.id); // 상대가 WebRTC offer를 걸어옴 — 중계 경로만 미리 준비
+      } else if (msg.type === 'peer-left') {
+        this.roomPeers.delete(msg.id);
+        this.relayPeers.delete(msg.id);
+        this.relayGreeted.delete(msg.id);
+        this.onChange();
       } else if (msg.type === 'signal') {
         await this._onSignal(msg.from, msg.payload);
+      } else if (msg.type === 'relay') {
+        await this._onMessage(msg.from, msg.payload, true);
       } else if (msg.type === 'peers') {
-        // 회복: 방에 있는데 나와 채널이 없는 피어 — id가 큰 쪽(나중 입장자)만
-        // 다시 걸어 양쪽 동시 제안 충돌(glare)을 피한다
         const mine = Number(this.myId?.slice(1) ?? 0);
         for (const peerId of msg.peers) {
+          this._noteRoomPeer(peerId);
           if (this.pcs.has(peerId) || this.channels.has(peerId)) continue;
-          if (mine > Number(peerId.slice(1))) this._offer(peerId);
+          if (mine > Number(peerId.slice(1))) this._offer(peerId); // glare 방지
         }
       }
-      // peer-joined는 상대가 나에게 offer를 걸어오므로 대기만 한다
     };
     // 신호 회선이 끊겨도 이미 성립된 WebRTC 연결은 계속 산다.
     // 새 참여자를 만나기 위해 자동으로 재접속한다.
@@ -340,16 +390,28 @@ export class BrowserMesh {
     if (ch?.dc.readyState === 'open') ch.dc.send(JSON.stringify(msg));
   }
 
-  async _onMessage(peerId, msg) {
-    const ch = this.channels.get(peerId);
-    if (!ch) return;
+  // 직접(WebRTC)·중계(서버) 어느 경로로 와도 동일하게 처리한다.
+  async _onMessage(peerId, msg, viaRelay = false) {
     switch (msg.type) {
-      case 'HELLO':
-        ch.hello = msg;
+      case 'HELLO': {
+        if (viaRelay) {
+          if (!this.relayPeers.has(peerId)) this.relayPeers.set(peerId, { hello: null });
+          this.relayPeers.get(peerId).hello = msg;
+          // 아직 이 피어에게 인사 안 했으면 답인사 (idempotent — 무한 반복 없음)
+          if (!this.relayGreeted.has(peerId)) {
+            this.relayGreeted.add(peerId);
+            this._deliver(peerId, this._helloMsg());
+          }
+        } else {
+          const ch = this.channels.get(peerId);
+          if (!ch) return;
+          ch.hello = msg;
+        }
         if (msg.identity) this._register(msg.identity);
-        this._sendTo(peerId, { type: 'REGISTRY', identities: this._identities() });
+        this._deliver(peerId, { type: 'REGISTRY', identities: this._identities() });
         this.onChange();
         break;
+      }
       case 'REGISTRY':
         for (const identity of msg.identities ?? []) this._register(identity);
         break;
@@ -362,7 +424,7 @@ export class BrowserMesh {
         const missing = this.node
           .entriesForTopic(msg.topicId)
           .filter((e) => !theirs.has(`${e.author}:${e.seq}:${e.hash.slice(0, 16)}`));
-        if (missing.length) this._sendTo(peerId, { type: 'ENTRIES', entries: missing });
+        if (missing.length) this._deliver(peerId, { type: 'ENTRIES', entries: missing });
         break;
       }
       case 'ENTRIES': {
@@ -403,19 +465,28 @@ export class BrowserMesh {
   }
 
   _gossip() {
-    for (const [peerId, ch] of this.channels) {
-      if (!ch.hello) continue;
-      this._sendTo(peerId, { type: 'REGISTRY', identities: this._identities() });
-      const shared = [...this.node.interests].filter((t) => ch.hello.interests.includes(t));
+    // 직접·중계 가릴 것 없이 닿는 모든 피어와 반보정 가십을 한다
+    for (const peerId of this._reachablePeers()) {
+      const hello = this._peerHello(peerId);
+      if (!hello) {
+        // 아직 인사 전이면 인사부터 (중계 경로 확보)
+        if (!this.relayGreeted.has(peerId)) {
+          this.relayGreeted.add(peerId);
+          this._deliver(peerId, this._helloMsg());
+        }
+        continue;
+      }
+      this._deliver(peerId, { type: 'REGISTRY', identities: this._identities() });
+      const shared = [...this.node.interests].filter((t) => hello.interests.includes(t));
       for (const topicId of shared) {
         const have = {};
         for (const e of this.node.entriesForTopic(topicId)) {
           (have[e.author] ??= []).push(`${e.seq}:${e.hash.slice(0, 16)}`);
         }
-        this._sendTo(peerId, { type: 'HAVE', topicId, have });
+        this._deliver(peerId, { type: 'HAVE', topicId, have });
       }
       if (this.node.forkProofs.size) {
-        this._sendTo(peerId, { type: 'FORKS', proofs: [...this.node.forkProofs.values()] });
+        this._deliver(peerId, { type: 'FORKS', proofs: [...this.node.forkProofs.values()] });
       }
     }
   }
@@ -425,16 +496,18 @@ export class BrowserMesh {
     if (this.node.interests.has(topicId)) return;
     this.node.interests.add(topicId);
     this.node._scheduleSave();
-    for (const peerId of this.channels.keys()) this._sendTo(peerId, this._helloMsg());
+    for (const peerId of this._reachablePeers()) this._deliver(peerId, this._helloMsg());
   }
 
-  // 내 행위: 로컬 서명·저장 후 관심 있는 이웃에게 즉시 전파
+  // 내 행위: 로컬 서명·저장 후 관심 있는 이웃에게 즉시 전파 (직접·중계 모두)
   async act(topicId, type, data) {
     const entry = await this.wallet.act(topicId, type, data);
     const r = await this.node.ingest(entry);
     if (!r.accepted) throw new Error(`거부됨: ${r.reason}`);
-    for (const [peerId, ch] of this.channels) {
-      if (ch.hello?.interests.includes(topicId)) this._sendTo(peerId, { type: 'ENTRIES', entries: [entry] });
+    for (const peerId of this._reachablePeers()) {
+      if (this._peerHello(peerId)?.interests.includes(topicId)) {
+        this._deliver(peerId, { type: 'ENTRIES', entries: [entry] });
+      }
     }
     this.onChange();
     return entry;
