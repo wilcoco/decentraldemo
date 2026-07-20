@@ -32,6 +32,7 @@ const HELP = {
   블라인드: '공표 직후에는 집계 숫자를 숨깁니다. 남들이 몇 명인지 보고 따라가는 쏠림을 막고, 논거를 읽고 스스로 판단하게 하기 위한 장치입니다.',
   배심: '이 의견의 심사를 위해 무작위로 추첨된 시민들입니다. 의견의 지문(해시)으로 뽑혀서 누구도 배심을 조작할 수 없습니다. 배심 다수의 승인 없이는 채택되지 않습니다.',
   줄서기: '지지와 반대는 "줄서기"입니다. 줄에 서는 순간 내 서명이 앞사람들의 기록을 고정하는 증인이 됩니다. 언제든 떠날 수 있고, 떠나면 그 순간 집계에서 빠집니다(기록은 역사로 남음).',
+  전파: '이 이슈가 링크를 타고 사람에서 사람으로 옮겨진 기록입니다. 링크를 만들 때마다 공유자의 서명(SHARE)이 남고, 그 서명은 자기가 받은 링크의 서명을 가리킵니다 — 참여의 줄서기처럼 전파에도 증인의 체인이 쌓입니다. 집계에는 영향을 주지 않습니다.',
 };
 
 let wallet = null;
@@ -167,29 +168,66 @@ async function unpackShare(s) {
   return new TextDecoder().decode(out);
 }
 
-// 현재 이슈를 링크로 포장: 공표 + 본문 항목(시간순, 크기 한도 내) + 작성자 공개키
+// 전파의 증인 체인: 내가 이 이슈를 "어느 링크(SHARE 항목)로 받았는가"를 기억한다.
+// 재공유할 때 내 SHARE가 그 항목을 가리키므로(via), 전파 경로가 서명 체인이 된다.
+const shareViaMap = () => {
+  try { return JSON.parse(localStorage.getItem('agora-share-via') ?? '{}'); } catch { return {}; }
+};
+const setShareVia = (topicId, hash) => {
+  const m = shareViaMap();
+  m[topicId] = hash;
+  localStorage.setItem('agora-share-via', JSON.stringify(m));
+};
+// 나에게 도달한 전파 계보 (기원 → … → 나에게 준 사람)
+function shareLineage(topicId) {
+  const chain = [];
+  const guard = new Set();
+  for (let h = shareViaMap()[topicId] ?? null; h && !guard.has(h); ) {
+    guard.add(h);
+    const e = node.byHash.get(h);
+    if (!e) break;
+    chain.push(e.author);
+    h = e.data?.via ?? null;
+  }
+  return chain.reverse();
+}
+
+// 현재 이슈를 링크로 포장: 공표 + 전파 계보 + 본문 항목(시간순, 크기 한도 내) + 작성자 공개키.
+// 공유하는 행위 자체가 서명된 SHARE 항목으로 남는다 — 참여(줄서기)의 증인처럼
+// 전파에도 증인이 생기고, 이 기록은 가십으로도 퍼진다 (집계에는 불포함).
 async function makeShareLink() {
   const item = catalogItems().find((c) => c.topicId === currentTopic);
   if (!item) return null;
+  const share = await mesh.act(currentTopic, 'SHARE', { via: shareViaMap()[currentTopic] ?? null });
+  const seen = new Set();
   const entries = [];
   const authorIds = new Set();
+  let size = 600;
   const push = (e) => {
+    if (!e || seen.has(e.hash)) return false;
+    seen.add(e.hash);
     entries.push(e);
     authorIds.add(e.author);
+    size += JSON.stringify(e).length;
+    return true;
   };
   push(node.byHash.get(item.announceId));
-  let size = 600;
-  for (const e of node.entriesForTopic(currentTopic).sort((a, b) => a.ts - b.ts)) {
-    const s = JSON.stringify(e).length;
-    if (size + s > 8000) break; // 메신저·QR에서 다루기 좋은 크기로 제한 — 나머지는 접속 시 가십이 채운다
+  // 전파 계보(SHARE 체인)는 잘리지 않도록 먼저 담는다 — 받는 사람이 경로를 검증할 수 있게
+  for (let h = share.hash; h; h = node.byHash.get(h)?.data?.via ?? null) {
+    if (!push(node.byHash.get(h))) break;
+  }
+  const all = node.entriesForTopic(currentTopic).sort((a, b) => a.ts - b.ts);
+  for (const e of all) {
+    if (seen.has(e.hash)) continue;
+    if (size + JSON.stringify(e).length > 8000) break; // 메신저·QR에서 다루기 좋은 크기로 제한 — 나머지는 접속 시 가십이 채운다
     push(e);
-    size += s;
   }
   const identities = [...authorIds]
     .map((cid) => ({ citizenId: cid, publicKey: node.registry.get(cid), name: mesh.names.get(cid) ?? null }))
     .filter((i) => i.publicKey);
-  const payload = JSON.stringify({ v: 1, topicId: currentTopic, identities, entries });
-  return `${location.origin}/app#share=${await packShare(payload)}`;
+  const payload = JSON.stringify({ v: 1, topicId: currentTopic, shareHash: share.hash, identities, entries });
+  const url = `${location.origin}/app#share=${await packShare(payload)}`;
+  return { url, included: entries.length, total: all.length + 1 };
 }
 
 // 공유 링크 수신: 신원 등록 → 구독 → 항목 검증·수용 (서명이 깨진 항목은 자동 거부)
@@ -208,7 +246,10 @@ async function importFromHash() {
       if (r.accepted) accepted += 1;
     }
     setCurrentTopic(payload.topicId);
-    shareNotice = `🔗 링크로 이슈를 받았습니다 — 항목 ${accepted}건 서명 검증 후 수용. 네트워크에 연결되면 나머지도 자동 동기화됩니다.`;
+    // 전파의 증인: 보낸 사람의 SHARE 항목이 서명 검증을 통과했을 때만 계보에 잇는다
+    const sender = payload.shareHash ? node.byHash.get(payload.shareHash) : null;
+    if (sender?.type === 'SHARE') setShareVia(payload.topicId, sender.hash);
+    shareNotice = `🔗 ${sender ? nameOf(sender.author) + '님이 보낸 ' : ''}링크로 이슈를 받았습니다 — 항목 ${accepted}건 서명 검증 후 수용. 네트워크에 연결되면 나머지도 자동 동기화됩니다.`;
   } catch {
     shareNotice = '공유 링크를 해석할 수 없습니다 (손상되었거나 너무 오래된 형식).';
   }
@@ -361,20 +402,34 @@ function renderTopic() {
   }
   const item = catalogItems().find((c) => c.topicId === currentTopic);
   const opts = topicOpts(currentTopic);
+  // 전파의 증인: 이 이슈가 링크로 몇 번 옮겨졌고, 나에게는 어떤 경로로 왔는가
+  const shareCount = node
+    .entriesForTopic(currentTopic)
+    .filter((e) => e.type === 'SHARE' && !node.forkProofs.has(e.author)).length;
+  const lineage = shareLineage(currentTopic);
+  const spreadLine =
+    shareCount || lineage.length
+      ? `<p class="hint">📣 링크 전파 ${shareCount}회 ${info('전파')}${
+          lineage.length ? ` · 나에게 온 경로: ${lineage.map((c) => esc(nameOf(c))).join(' → ')} → 나` : ''
+        }</p>`
+      : '';
   header.innerHTML = `<h2>${esc(item?.title ?? currentTopic)}
     ${item?.charter ? `<span class="badge charter">헌장 의제</span>${info('헌장')}` : ''}
     <button class="btn small" id="share-topic" title="이 이슈 전체(공표+의견+서명)를 링크 하나에 담아 공유합니다. 받는 사람은 접속만 해도 이슈가 자기 기기에 들어옵니다.">🔗 링크로 공유</button>
     <span id="share-msg" class="hint"></span></h2>
     ${shareNotice ? `<p class="hint" style="color:var(--ok)">${esc(shareNotice)}</p>` : ''}
     ${item?.description ? `<p class="hint">${esc(item.description)}</p>` : ''}
-    ${helpBox(['헌장'])}`;
+    ${spreadLine}
+    ${helpBox(['헌장', '전파'])}`;
   document.getElementById('share-topic')?.addEventListener('click', async () => {
-    const url = await makeShareLink();
-    if (!url) return;
+    const made = await makeShareLink();
+    if (!made) return;
+    const { url, included, total } = made;
     const msg = document.getElementById('share-msg');
+    const cut = included < total ? ` · ${total}건 중 ${included}건 담김, 나머지는 접속 시 동기화` : '';
     try {
       await navigator.clipboard.writeText(url);
-      if (msg) msg.textContent = '복사됨! 카톡·문자 어디로든 보내세요 (' + url.length + '자)';
+      if (msg) msg.textContent = `복사됨! 카톡·문자 어디로든 보내세요 (${url.length}자${cut})`;
     } catch {
       prompt('이 링크를 복사해 공유하세요:', url);
     }
