@@ -50,14 +50,21 @@ header {
 .pill { padding: 4px 12px; border-radius: 999px; font-size: 0.75rem; border: 1px solid var(--border); background: var(--card); }
 .pill.ok { color: var(--ok); border-color: var(--ok); }
 
-main {
+/* 광장 뷰: 피드 + 보조 열 */
+#plaza-view {
   display: grid;
-  grid-template-columns: 300px 1fr 280px;
+  grid-template-columns: 1fr 300px;
   gap: 14px;
   padding: 14px 22px;
   align-items: start;
+  max-width: 1100px;
+  margin: 0 auto;
 }
-@media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+/* 이슈 상세 뷰: 칸반 + 하단 내 위치 바 */
+#topic-view { padding: 14px 22px 0; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 1100px) {
+  #plaza-view { grid-template-columns: 1fr; }
+}
 
 h2 { font-size: 0.95rem; margin-bottom: 8px; }
 h2 small, h3 small { color: var(--muted); font-weight: normal; font-size: 0.72rem; }
@@ -128,9 +135,9 @@ textarea { min-height: 56px; resize: vertical; }
 .blind-note { color: var(--warn); font-size: 0.8rem; margin: 6px 0; }
 .jury-note { color: var(--muted); font-size: 0.75rem; margin: 4px 0; }
 
-#delegation-box { display: flex; align-items: center; gap: 10px; }
+#delegation-box { display: flex; align-items: center; gap: 8px; }
 #delegation-box label { font-size: 0.8rem; white-space: nowrap; }
-#delegation-box select { margin: 0; width: auto; flex: 0 0 180px; }
+#delegation-box select { margin: 0; width: auto; flex: 0 0 170px; }
 
 .insight-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .insight-row:last-child { border: none; }
@@ -209,3 +216,68 @@ textarea { min-height: 56px; resize: vertical; }
 .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; margin-top: 0.42em; animation: livepulse 2s ease-in-out infinite; }
 @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .live .dot { animation: none; } }
+
+/* ── 신뢰 스트립: 근거 있는 사실만 상주 ─────────────────── */
+.trust-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.trust-extra { color: var(--muted); font-size: 0.7rem; text-align: right; line-height: 1.4; max-width: 380px; }
+.trust-extra b { color: var(--text); }
+.trust-extra .warn-flag { color: var(--warn); }
+
+/* ── 광장 피드 ──────────────────────────────────────────── */
+.guide-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.85rem; }
+.feed-card { margin-bottom: 12px; }
+.feed-card h3 { margin: 0; font-size: 1rem; cursor: pointer; }
+.feed-card h3:hover { color: var(--accent); }
+.feed-meta { color: var(--muted); font-size: 0.75rem; margin: 4px 0 7px; }
+.arg-pair { border-top: 1px solid var(--border); padding-top: 7px; margin-top: 4px; font-size: 0.8rem; }
+.arg-pair div { margin: 2px 0; line-height: 1.45; }
+.badge.adopted { color: var(--ok); border-color: var(--ok); }
+.badge.blind-b { color: var(--warn); border-color: var(--warn); }
+.badge.mine-b { color: var(--accent); border-color: var(--accent); }
+.fab {
+  position: fixed; right: 22px; bottom: 20px; z-index: 8;
+  border-radius: 999px; padding: 11px 18px; font-size: 0.9rem; font-weight: 700;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+.empty-plaza { text-align: center; padding: 24px 16px !important; }
+.empty-plaza h3 { margin-bottom: 8px; }
+
+/* ── 이슈 상세: 칸반 ───────────────────────────────────── */
+#topic-nav { display: flex; justify-content: space-between; margin-bottom: 10px; }
+#topic-body { display: flex; gap: 12px; align-items: flex-start; }
+#opinions { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity; flex: 1; padding-bottom: 6px; align-items: flex-start; }
+.kanban-col { flex: 0 0 min(330px, 86vw); scroll-snap-align: start; border-top: 3px solid var(--border); border-radius: 10px; }
+.kanban-col > .opinion { margin-bottom: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.kanban-col.st-채택 { border-top-color: var(--ok); }
+.kanban-col.st-채택대기 { border-top-color: var(--warn); }
+.kanban-col.st-우세 { border-top-color: var(--accent); }
+.kanban-col.st-반대우세, .kanban-col.st-배심기각 { border-top-color: var(--bad); }
+.kanban-col.ghost-col {
+  border: 1.5px dashed var(--border); border-radius: 10px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 170px; gap: 8px; color: var(--muted); font-size: 0.83rem; text-align: center; padding: 16px;
+}
+#reorder-banner { border-color: var(--warn); color: var(--warn); font-size: 0.8rem; cursor: pointer; padding: 8px 12px; }
+@media (max-width: 1100px) { #opinions { flex-direction: column; } .kanban-col { flex: 1 1 auto; width: 100%; } }
+
+/* 하단 "내 위치" 바 — 잠정성의 상설 표시 */
+#my-bar {
+  position: sticky; bottom: 0; z-index: 6;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--panel); border-top: 1px solid var(--border);
+  margin: 12px -22px 0; padding: 10px 22px calc(10px + env(safe-area-inset-bottom));
+  font-size: 0.83rem;
+}
+#my-bar-pos b { color: var(--accent); }
+#my-bar .new-opp { color: var(--bad); font-size: 0.78rem; }
+
+/* ── 장부 패널 ─────────────────────────────────────────── */
+#ledger { flex: 0 0 320px; max-height: 72vh; overflow-y: auto; font-size: 0.8rem; }
+#ledger h3 { font-size: 0.88rem; margin-bottom: 4px; }
+.ledger-head { color: var(--muted); font-size: 0.75rem; margin-bottom: 8px; line-height: 1.5; }
+.ledger-ev { border-left: 3px solid var(--accent); background: var(--bg); border-radius: 0 8px 8px 0; padding: 6px 10px; margin: 6px 0; line-height: 1.5; }
+.ledger-ev.opp { border-left-color: var(--bad); }
+.ledger-ev.share { border-left-color: var(--warn); }
+.ledger-ev.fork { border-left-color: var(--muted); }
+.ledger-ev .sub { color: var(--muted); font-size: 0.72rem; display: block; }
+@media (max-width: 1100px) { #topic-body { flex-direction: column; } #ledger { flex: 1 1 auto; width: 100%; max-height: 45vh; } }

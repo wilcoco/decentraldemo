@@ -27,18 +27,33 @@
     </div>
     <div class="header-right">
       <button id="help-btn" class="btn small">❓ 사용법</button>
-      <div id="net-status" class="pill">연결 중…</div>
+      <div class="trust-strip">
+        <div id="net-status" class="pill">연결 중…</div>
+        <span id="trust-extra" class="trust-extra"></span>
+      </div>
     </div>
   </header>
 
-  <main>
-    <aside id="left">
-      <div class="card">
-        <h2>전체 이슈 <small>(카탈로그 — 모두가 목차를 가진다)</small></h2>
-        <input id="catalog-filter" placeholder="키워드 검색" />
-        <div id="catalog-list"></div>
+  <!-- ══ 광장 뷰: 이슈 발견 (피드) ══════════════════════════ -->
+  <main id="plaza-view">
+    <section id="feed-col">
+      <div class="card guide-banner">
+        <span>이슈를 고르고, 의견 뒤에 <b>줄을 서세요</b>. 마음이 바뀌면 언제든 옮기면 됩니다.</span>
+        <button id="guide-banner-btn" class="btn small">30초 안내</button>
       </div>
-      <div class="card">
+      <div id="guide" class="card guide hidden">
+        <h3>아고라 라이브, 3분 안내</h3>
+        <ol>
+          <li><b>이슈를 고르거나 만듭니다</b> — 광장의 이슈 카드에서 [줄 서러 가기]를 누르거나, 새 이슈를 공표하세요. 모든 참여자의 목록에 자동으로 나타납니다.</li>
+          <li><b>의견 뒤에 줄을 섭니다</b> — 이슈마다 여러 의견(해결책)이 나란히 경쟁하고, 의견마다 지지의 줄과 반대의 줄이 보입니다. 줄 끝의 <b>[＋ 나도 여기 서기]</b>를 누르면 내가 그 줄에 서고, 내 서명이 앞사람들의 기록을 지키는 증인이 됩니다. 고치고 싶으면 ✏️ 수정안을 낼 수 있습니다.</li>
+          <li><b>마음이 바뀌면 그냥 옮기세요</b> — 임기도 마감도 없습니다. 입장을 철회하거나 반대편에 서는 순간 집계가 실시간으로 바뀝니다. 바쁜 이슈는 신뢰하는 사람에게 <b>위임</b>하세요.</li>
+        </ol>
+        <p class="hint">이 모든 기록은 당신의 브라우저에서 서명되어 참여자들의 기기 사이를 직접 흐릅니다 — 중앙 서버 없음. 화면 곳곳의 <b>ⓘ</b>를 누르면 각 지표의 뜻을 볼 수 있습니다.</p>
+        <button id="guide-close" class="btn primary">알겠어요, 시작할게요</button>
+      </div>
+      <input id="catalog-filter" placeholder="키워드 검색" />
+      <div id="catalog-list"></div>
+      <div id="announce-card" class="card hidden">
         <h3>➕ 새 이슈 만들기</h3>
         <p class="hint">모든 참여자의 목록에 공표됩니다.</p>
         <form id="announce-form">
@@ -48,35 +63,8 @@
           <button class="btn primary" type="submit">네트워크에 공표</button>
         </form>
       </div>
-    </aside>
-
-    <section id="center">
-      <div id="guide" class="card guide hidden">
-        <h3>아고라 라이브, 3분 안내</h3>
-        <ol>
-          <li><b>이슈를 고르거나 만듭니다</b> — 왼쪽 <b>전체 이슈</b>에서 [구독하고 참여]를 누르거나, 새 이슈를 공표하세요. 모든 참여자의 목록에 자동으로 나타납니다.</li>
-          <li><b>의견 뒤에 줄을 섭니다</b> — 이슈마다 여러 의견(해결책)이 경쟁하고, 의견마다 지지의 줄과 반대의 줄이 보입니다. 줄 끝의 <b>[＋ 나도 여기 서기]</b>를 누르면 내가 그 줄에 서고, 내 서명이 앞사람들의 기록을 지키는 증인이 됩니다. 고치고 싶으면 ✏️ 수정안을 낼 수 있습니다.</li>
-          <li><b>마음이 바뀌면 그냥 옮기세요</b> — 임기도 마감도 없습니다. 입장을 철회하거나 반대편에 서는 순간 집계가 실시간으로 바뀝니다. 바쁜 이슈는 신뢰하는 사람에게 <b>위임</b>하세요.</li>
-        </ol>
-        <p class="hint">이 모든 기록은 당신의 브라우저에서 서명되어 참여자들의 기기 사이를 직접 흐릅니다 — 중앙 서버 없음. 화면 곳곳의 <b>ⓘ</b>를 누르면 각 지표의 뜻을 볼 수 있습니다.</p>
-        <button id="guide-close" class="btn primary">알겠어요, 시작할게요</button>
-      </div>
-      <div id="topic-header"><p class="hint">왼쪽에서 이슈를 구독하거나 새로 공표하세요.</p></div>
-      <div id="delegation-box" class="card hidden">
-        <label>🗳 이 이슈의 내 목소리:</label>
-        <select id="delegate-select"></select>
-        <span id="delegation-help"></span>
-      </div>
-      <div id="opinions"></div>
-      <form id="propose-form" class="card hidden">
-        <h3>새 의견 제안 (줄의 머리가 됩니다)</h3>
-        <input id="propose-title" placeholder="주장 한 줄 요약" required />
-        <textarea id="propose-body" placeholder="구체적 내용과 논거"></textarea>
-        <button class="btn primary" type="submit">제안하기</button>
-      </form>
     </section>
-
-    <aside id="right">
+    <aside id="plaza-side">
       <div class="card">
         <h2>안목 지수 <small>(일찍 알아본 기록)</small></h2>
         <div id="insight-list"></div>
@@ -88,6 +76,35 @@
           연결 후 모든 항목은 브라우저 사이를 직접 흐릅니다.</p>
       </div>
     </aside>
+    <button id="fab-announce" class="btn primary fab hidden">＋ 이슈 공표</button>
+  </main>
+
+  <!-- ══ 이슈 상세 뷰: 의견들의 경쟁 + 줄서기 ═══════════════ -->
+  <main id="topic-view" class="hidden">
+    <div id="topic-nav">
+      <button id="back-plaza" class="btn small">← 광장</button>
+      <button id="ledger-btn" class="btn small">📜 장부 <small>(검증)</small></button>
+    </div>
+    <div id="topic-header"></div>
+    <div id="reorder-banner" class="card hidden">↻ 순위가 바뀌었습니다 — 눌러서 열 순서 새로고침 (읽는 중에 화면이 튀지 않도록 자동으로 바꾸지 않습니다)</div>
+    <div id="topic-body">
+      <div id="opinions"></div>
+      <aside id="ledger" class="card hidden"></aside>
+    </div>
+    <form id="propose-form" class="card">
+      <h3>새 의견 제안 (줄의 머리가 됩니다)</h3>
+      <input id="propose-title" placeholder="주장 한 줄 요약" required />
+      <textarea id="propose-body" placeholder="구체적 내용과 논거"></textarea>
+      <button class="btn primary" type="submit">제안하기</button>
+    </form>
+    <div id="my-bar">
+      <div id="my-bar-pos"></div>
+      <div id="delegation-box">
+        <label>🗳 내 목소리:</label>
+        <select id="delegate-select"></select>
+        <span id="delegation-help"></span>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="/p2p/app.js"></script>
