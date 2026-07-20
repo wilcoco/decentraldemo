@@ -420,6 +420,7 @@ function renderTopic() {
     ${shareNotice ? `<p class="hint" style="color:var(--ok)">${esc(shareNotice)}</p>` : ''}
     ${item?.description ? `<p class="hint">${esc(item.description)}</p>` : ''}
     ${spreadLine}
+    <p class="hint live"><span class="dot"></span>임기도 마감도 없습니다 — 아래 모든 상태는 저장된 결과가 아니라 지금 이 순간 다시 계산된 것이며, 누군가 입장을 옮기면 그 즉시 바뀝니다.</p>
     ${helpBox(['헌장', '전파'])}`;
   document.getElementById('share-topic')?.addEventListener('click', async () => {
     const made = await makeShareLink();
@@ -456,6 +457,36 @@ function renderTopic() {
     '<div class="card empty-guide"><h3>아직 의견이 없습니다</h3><p class="hint">이 이슈에 대한 <b>첫 의견(해결책·주장)</b>을 아래에서 제안해 보세요.<br/>제안한 의견에는 다른 시민들이 논거를 붙여 지지하거나 반대하게 됩니다.</p></div>';
 
   bindOpinionActions();
+}
+
+// 줄서기 시각화 — 의견 뒤에 실제로 선 사람들의 줄을 그린다.
+// ← 는 증인의 방향: 뒤에 선 사람의 서명이 앞사람의 기록을 가리켜 고정한다.
+function lineViz(o, mine) {
+  if (o.blind) return ''; // 블라인드 구간엔 줄도 숨긴다 (쏠림 방지 — 콩도르세)
+  const chip = (cid, side) =>
+    `<span class="chip ${side === 'oppose' ? 'opp-side' : ''} ${cid === wallet.citizenId ? 'me' : ''}">${esc(nameOf(cid))}${
+      cid === wallet.citizenId ? ' (나)' : ''
+    }</span>`;
+  const wit = '<span class="wit">←</span>';
+
+  const supChips = [`<span class="chip head">💡 제안 ${esc(nameOf(o.authorId))}</span>`];
+  for (const cid of o.standers.filter((c) => c !== o.authorId)) supChips.push(wit + chip(cid, 'support'));
+  if (o.delegatedSupport > 0) supChips.push(wit + `<span class="chip dele">🗳 위임된 표 ×${o.delegatedSupport}</span>`);
+  if (mine !== 'support') supChips.push(wit + `<button class="chip ghost" data-sup="${o.id}">＋ 나도 여기 서기</button>`);
+
+  const oppChips = o.opposers.map((cid, i) => (i ? wit : '') + chip(cid, 'oppose'));
+  if (o.delegatedOppose > 0) oppChips.push((oppChips.length ? wit : '') + `<span class="chip dele">🗳 위임된 표 ×${o.delegatedOppose}</span>`);
+  if (mine !== 'oppose') oppChips.push((oppChips.length ? wit : '') + `<button class="chip ghost opp-side" data-opp="${o.id}">＋ 반대편에 서기</button>`);
+
+  return `
+  <div class="line-block">
+    <div class="line-label">👍 지지의 줄 — 뒤에 서는 사람이 앞사람의 증인이 됩니다</div>
+    <div class="line-row">${supChips.join('')}</div>
+  </div>
+  <div class="line-block">
+    <div class="line-label">👎 반대의 줄 — 반대도 같은 방식의 줄입니다</div>
+    <div class="line-row">${oppChips.join('')}</div>
+  </div>`;
 }
 
 function opinionCard(o) {
@@ -524,6 +555,7 @@ function opinionCard(o) {
     </div>
     <p class="op-meta">제안: ${esc(nameOf(o.authorId))}</p>
     ${o.body ? `<p class="op-body">${esc(o.body)}</p>` : ''}
+    ${lineViz(o, mine)}
     ${numbers}
     ${jury}
     ${helpBox(['상태', '권위', '다양성', '블라인드', '배심'])}

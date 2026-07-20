@@ -178,6 +178,34 @@ textarea { min-height: 56px; resize: vertical; }
   background: rgba(224, 85, 85, 0.08); border: 1px solid var(--bad); border-radius: 8px;
   color: var(--text); font-size: 0.82rem; padding: 9px 11px; margin-bottom: 10px; line-height: 1.55;
 }
-.metrics { color: var(--muted); font-size: 0.76rem; margin: 4px 0; }
+.metrics { color: var(--muted); font-size: 0.72rem; margin: 4px 0; opacity: 0.9; }
 .amend-tag { color: var(--warn); font-size: 0.72rem; margin-bottom: 4px; }
 .status { cursor: pointer; }
+
+/* ── 줄서기 시각화: 의도가 보이는 UI ─────────────────────────
+   지지는 숫자가 아니라 "사람들이 선 줄"이다. 화살표(←)는 뒤에 선
+   사람의 서명이 앞사람의 기록을 가리켜 증인이 되는 방향이다. */
+.line-block { margin: 10px 0 2px; }
+.line-label { font-size: 0.72rem; color: var(--muted); margin-bottom: 5px; }
+.line-row { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; row-gap: 7px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.76rem; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: inherit; white-space: nowrap;
+}
+.chip.head { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.opp-side { border-color: var(--bad); color: var(--bad); }
+.chip.me { border-color: var(--accent); border-width: 2px; font-weight: 700; }
+.chip.me.opp-side { border-color: var(--bad); }
+.chip.ghost { border-style: dashed; color: var(--muted); background: transparent; cursor: pointer; }
+.chip.ghost:hover { border-color: var(--accent); color: var(--accent); }
+.chip.ghost.opp-side:hover { border-color: var(--bad); color: var(--bad); }
+.chip.dele { border-style: dotted; color: var(--muted); }
+.line-row .wit { color: var(--muted); font-size: 0.72rem; padding: 0 1px; }
+
+/* "지금 이 순간" — 레그 없음을 화면이 말하게 한다 */
+.live { display: flex; align-items: flex-start; gap: 7px; }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; margin-top: 0.42em; animation: livepulse 2s ease-in-out infinite; }
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .live .dot { animation: none; } }
