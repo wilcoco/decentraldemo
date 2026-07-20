@@ -87,6 +87,7 @@ async function boot(name) {
   node.registry.set(wallet.citizenId, wallet.publicKey);
   mesh = new BrowserMesh({ node, wallet, onChange: render });
   mesh.connect(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/signal`);
+  await importFromHash(); // 링크에 실려 온 이슈 수용 (네트워크 없이도 동작)
   const savedTopic = localStorage.getItem('agora-current-topic');
   if (savedTopic && node.interests.has(savedTopic)) currentTopic = savedTopic;
   $('#join-overlay').classList.add('hidden');
@@ -141,6 +142,78 @@ const helpBox = (keys) =>
   openHelp && keys.includes(openHelp)
     ? `<div class="help-pop"><b>${openHelp}</b> — ${esc(HELP[openHelp])} <button class="btn small ghost" data-help-close>닫기</button></div>`
     : '';
+
+// ── URL 공유: 데이터를 실은 링크 (제3의 전송로) ──────────────
+// 모든 항목이 서명된 자기검증 데이터이므로 URL에 실어도 위조가 불가능하고
+// (수신 측 ingest가 서명을 검증), 해시(#) 부분은 서버로 전송되지 않으므로
+// 신호 서버조차 내용을 보지 못한다. 카톡·문자·QR가 곧 전송로가 된다 —
+// 네트워크 연결이 전혀 없어도 이슈가 사람에서 사람으로 옮겨진다.
+const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+async function packShare(str) {
+  const bytes = new TextEncoder().encode(str);
+  if (typeof CompressionStream === 'undefined') return 'p' + b64url(bytes);
+  const cs = new CompressionStream('deflate-raw');
+  const out = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer());
+  return 'z' + b64url(out);
+}
+
+async function unpackShare(s) {
+  const bytes = unb64url(s.slice(1));
+  if (s[0] === 'p') return new TextDecoder().decode(bytes);
+  const ds = new DecompressionStream('deflate-raw');
+  const out = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+  return new TextDecoder().decode(out);
+}
+
+// 현재 이슈를 링크로 포장: 공표 + 본문 항목(시간순, 크기 한도 내) + 작성자 공개키
+async function makeShareLink() {
+  const item = catalogItems().find((c) => c.topicId === currentTopic);
+  if (!item) return null;
+  const entries = [];
+  const authorIds = new Set();
+  const push = (e) => {
+    entries.push(e);
+    authorIds.add(e.author);
+  };
+  push(node.byHash.get(item.announceId));
+  let size = 600;
+  for (const e of node.entriesForTopic(currentTopic).sort((a, b) => a.ts - b.ts)) {
+    const s = JSON.stringify(e).length;
+    if (size + s > 8000) break; // 메신저·QR에서 다루기 좋은 크기로 제한 — 나머지는 접속 시 가십이 채운다
+    push(e);
+    size += s;
+  }
+  const identities = [...authorIds]
+    .map((cid) => ({ citizenId: cid, publicKey: node.registry.get(cid), name: mesh.names.get(cid) ?? null }))
+    .filter((i) => i.publicKey);
+  const payload = JSON.stringify({ v: 1, topicId: currentTopic, identities, entries });
+  return `${location.origin}/app#share=${await packShare(payload)}`;
+}
+
+// 공유 링크 수신: 신원 등록 → 구독 → 항목 검증·수용 (서명이 깨진 항목은 자동 거부)
+let shareNotice = null;
+async function importFromHash() {
+  const m = location.hash.match(/#share=(.+)/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search); // 해시는 흔적 없이 제거
+  try {
+    const payload = JSON.parse(await unpackShare(m[1]));
+    for (const identity of payload.identities ?? []) mesh._register(identity);
+    mesh.follow(payload.topicId); // 항목 수용 전에 관심사에 넣어야 ingest가 받는다
+    let accepted = 0;
+    for (const e of payload.entries ?? []) {
+      const r = await node.ingest(e);
+      if (r.accepted) accepted += 1;
+    }
+    setCurrentTopic(payload.topicId);
+    shareNotice = `🔗 링크로 이슈를 받았습니다 — 항목 ${accepted}건 서명 검증 후 수용. 네트워크에 연결되면 나머지도 자동 동기화됩니다.`;
+  } catch {
+    shareNotice = '공유 링크를 해석할 수 없습니다 (손상되었거나 너무 오래된 형식).';
+  }
+}
+window.__makeShareLink = () => makeShareLink(); // E2E 검증용 훅
 
 // ── 행위 ─────────────────────────────────────────────────────
 async function announce(title, description, charter) {
@@ -289,9 +362,23 @@ function renderTopic() {
   const item = catalogItems().find((c) => c.topicId === currentTopic);
   const opts = topicOpts(currentTopic);
   header.innerHTML = `<h2>${esc(item?.title ?? currentTopic)}
-    ${item?.charter ? `<span class="badge charter">헌장 의제</span>${info('헌장')}` : ''}</h2>
+    ${item?.charter ? `<span class="badge charter">헌장 의제</span>${info('헌장')}` : ''}
+    <button class="btn small" id="share-topic" title="이 이슈 전체(공표+의견+서명)를 링크 하나에 담아 공유합니다. 받는 사람은 접속만 해도 이슈가 자기 기기에 들어옵니다.">🔗 링크로 공유</button>
+    <span id="share-msg" class="hint"></span></h2>
+    ${shareNotice ? `<p class="hint" style="color:var(--ok)">${esc(shareNotice)}</p>` : ''}
     ${item?.description ? `<p class="hint">${esc(item.description)}</p>` : ''}
     ${helpBox(['헌장'])}`;
+  document.getElementById('share-topic')?.addEventListener('click', async () => {
+    const url = await makeShareLink();
+    if (!url) return;
+    const msg = document.getElementById('share-msg');
+    try {
+      await navigator.clipboard.writeText(url);
+      if (msg) msg.textContent = '복사됨! 카톡·문자 어디로든 보내세요 (' + url.length + '자)';
+    } catch {
+      prompt('이 링크를 복사해 공유하세요:', url);
+    }
+  });
   $('#propose-form').classList.remove('hidden');
   $('#delegation-box').classList.remove('hidden');
 
